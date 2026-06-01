@@ -30,10 +30,23 @@ uvicorn app.main:app --reload
 ## Docker
 ```
 docker build -t rec-o .
-docker run --name rec-o-api -p 8000:8000 rec-o
+docker run --name rec-o-api -p 8000:8000 --env-file .env rec-o
 ```
 
 Delete if needed:
 ```
 docker rm rec-o-api
 ```
+
+## .env
+Token was generated with:
+```
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+## GCP
+APIs activated for project:
+* Cloud Build API
+* Artifact Registry API
+* Cloud Run Admin API
+* Secret Manager API
