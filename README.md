@@ -26,3 +26,14 @@ uvicorn app.main:app --reload
 * [http://localhost:8000](http://localhost:8000)
 * [http://localhost:8000/docs](http://localhost:8000/predict)
 * [http://localhost:8000/docs](http://localhost:8000/docs)
+
+## Docker
+```
+docker build -t rec-o .
+docker run --name rec-o-api -p 8000:8000 rec-o
+```
+
+Delete if needed:
+```
+docker rm rec-o-api
+```
