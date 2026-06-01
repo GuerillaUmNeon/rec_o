@@ -18,3 +18,11 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip freeze
 ```
+
+## FastAPI
+```
+uvicorn app.main:app --reload
+```
+* [http://localhost:8000](http://localhost:8000)
+* [http://localhost:8000/docs](http://localhost:8000/predict)
+* [http://localhost:8000/docs](http://localhost:8000/docs)
