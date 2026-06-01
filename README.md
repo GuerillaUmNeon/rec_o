@@ -1,6 +1,7 @@
 # rec_o
 
 ## Set up your machine
+### Virtualenv
 ```
 cd ~/code
 mkdir GuerillaUmNeon
@@ -9,4 +10,11 @@ cd rec_o
 pyenv install 3.13.13
 pyenv virtualenv 3.13.13 rec-o-env
 pyenv local rec-o-env
+```
+
+### Requirements
+```
+pip install --upgrade pip
+pip install -r requirements.txt
+pip freeze
 ```
