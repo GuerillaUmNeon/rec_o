@@ -14,6 +14,8 @@ from app.schemas import (
     PlaylistOutput,
     AlbumSearchInput,
     AlbumSearchOutput,
+    ArtistSearchInput,
+    ArtistSearchOutput,
 )
 
 load_dotenv()
@@ -111,6 +113,38 @@ def search_album(
         AlbumSearchOutput(
             release_group_id=row[0],
             title=row[1]
+        )
+        for row in rows
+    ]
+
+
+@app.post("/search/artist", response_model=list[ArtistSearchOutput])
+def search_artist(
+    input: ArtistSearchInput,
+    _: str = Depends(verify_api_key),
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+    SELECT
+        id,
+        name
+    FROM musicbrainz.artist
+    WHERE name ILIKE %s
+    LIMIT 20;
+    """
+
+    cursor.execute(query, (f"%{input.name}%",))
+    rows = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return [
+        ArtistSearchOutput(
+            id=row[0],
+            name=row[1]
         )
         for row in rows
     ]
