@@ -30,6 +30,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2026.2
 uvicorn==0.48.0
+wrapt==2.2.1
 matplotlib==3.10.9
 seaborn==0.13.2
-wrapt==2.2.1
