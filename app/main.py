@@ -1,4 +1,5 @@
 import os
+import psycopg2
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
@@ -8,7 +9,14 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.predictor import predict_playlist
-from app.schemas import PlaylistInput, PlaylistOutput
+from app.schemas import (
+    PlaylistInput,
+    PlaylistOutput,
+    AlbumSearchInput,
+    AlbumSearchOutput,
+    ArtistSearchInput,
+    ArtistSearchOutput,
+)
 
 load_dotenv()
 
@@ -45,6 +53,16 @@ def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
     return api_key
 
 
+def get_db_connection():
+    return psycopg2.connect(
+        host=os.getenv("POSTGRES"),
+        port=5432,
+        database=os.getenv("DATABASE"),
+        user=os.getenv("DB_USERNAME"),
+        password=os.getenv("DB_PASSWORD")
+    )
+
+
 @app.get("/")
 @limiter.limit("60/minute")
 def read_root(request: Request):
@@ -58,5 +76,75 @@ def predict(
     input: PlaylistInput,
     _: str = Depends(verify_api_key),
 ):
-    artist_name, artist_genre = predict_playlist(input.ArtistName, input.Genre)
-    return PlaylistOutput(ArtistName=artist_name, Genre=artist_genre)
+    artist_name, artist_genre = predict_playlist(
+        input.ArtistName,
+        input.Genre
+    )
+    return PlaylistOutput(
+        ArtistName=artist_name,
+        Genre=artist_genre
+    )
+
+
+@app.post("/search/album", response_model=list[AlbumSearchOutput])
+def search_album(
+    input: AlbumSearchInput,
+    _: str = Depends(verify_api_key),
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+    SELECT
+        id AS release_group_id,
+        name AS title
+    FROM musicbrainz.release_group
+    WHERE name ILIKE %s
+    LIMIT 20;
+    """
+
+    cursor.execute(query, (f"%{input.title}%",))
+    rows = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return [
+        AlbumSearchOutput(
+            release_group_id=row[0],
+            title=row[1]
+        )
+        for row in rows
+    ]
+
+
+@app.post("/search/artist", response_model=list[ArtistSearchOutput])
+def search_artist(
+    input: ArtistSearchInput,
+    _: str = Depends(verify_api_key),
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    query = """
+    SELECT
+        id,
+        name
+    FROM musicbrainz.artist
+    WHERE name ILIKE %s
+    LIMIT 20;
+    """
+
+    cursor.execute(query, (f"%{input.name}%",))
+    rows = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return [
+        ArtistSearchOutput(
+            id=row[0],
+            name=row[1]
+        )
+        for row in rows
+    ]
