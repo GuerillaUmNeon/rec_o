@@ -1,0 +1,28 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - rec-o-api
+      - --image=europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+      - --region=europe-west1
+      - --allow-unauthenticated
+      - --port=8000
+      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest
