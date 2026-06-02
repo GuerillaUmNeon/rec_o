@@ -20,17 +20,12 @@ pip freeze
 ```
 
 ## FastAPI
-### Test
 ```
 uvicorn app.main:app --reload
 ```
 * [http://localhost:8000](http://localhost:8000)
 * [http://localhost:8000/predict](http://localhost:8000/predict)
 * [http://localhost:8000/docs](http://localhost:8000/docs)
-
-### Prod
-* https://rec-o-api-779590423195.europe-west1.run.app/
-* https://rec-o-api-779590423195.europe-west1.run.app/docs#/
 
 ## Docker
 ```
