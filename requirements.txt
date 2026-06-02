@@ -21,3 +21,9 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2026.2
 uvicorn==0.48.0
+pathlib
+dotenv
+psycopg
+psycopg-binary
+matplotlib
+seaborn
