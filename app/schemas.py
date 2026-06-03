@@ -28,3 +28,4 @@ class ArtistSearchInput(BaseModel):
 class ArtistSearchOutput(BaseModel):
     id: int
     name: str
+    disambiguation: str | None = None
