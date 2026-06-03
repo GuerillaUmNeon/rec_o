@@ -130,10 +130,10 @@ def search_artist(
     """
     rows = fetch_all(ARTIST_SEARCH_QUERY, (f"%{input.name}%",))
     return [
-        ArtistSearchOutput(
-            id=row[0],
-            name=row[1],
-            disambiguation=row[2]
-        )
+         ArtistSearchOutput(
+    artist_id=row[0],
+    name=row[1],
+    disambiguation=row[2]
+)
         for row in rows
     ]
