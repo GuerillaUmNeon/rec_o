@@ -1,5 +1,5 @@
 import os
-import psycopg2
+import psycopg
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
