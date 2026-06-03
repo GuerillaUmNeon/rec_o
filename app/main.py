@@ -96,7 +96,14 @@ def predict(
     JSON body: ArtistName, Genre (see PlaylistInput).
     Requires the X-API-Key header.
     """
-    artist_name, artist_genre = predict_playlist(input.ArtistName, input.Genre)
+    try:
+        artist_name, artist_genre = predict_playlist(input.ArtistName, input.Genre)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
     return PlaylistOutput(ArtistName=artist_name, Genre=artist_genre)
 
 

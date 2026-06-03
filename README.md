@@ -41,6 +41,7 @@ Copy `.env.sample` to `.env` and fill in values:
 - `TOKEN_API_KEY` — API key for protected routes (see below)
 - `POSTGRES`, `DB_PORT`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD` — PostgreSQL (MusicBrainz)
 - Optional: `DATABASE_URL` overrides the variables above
+- `MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME` — Google Cloud Storage location for the recommender artifact
 
 Generate a token:
 
@@ -74,6 +75,27 @@ X-API-Key: <TOKEN_API_KEY>
 
 In Swagger, use **Authorize** and enter the same value.
 
+## Save the latest model
+
+The API loads the latest KNN recommender artifact from Google Cloud Storage when `MODEL_BUCKET_NAME` is configured.
+
+The final notebook model must be saved as an artifact containing the fitted vectorizer, fitted KNN model, and cleaned dataframe:
+
+```python
+from app.predictor import save_model
+
+artifact = {
+    "vectorizer": vectorizer,
+    "model": knn_model,
+    "artist_names": artist_names,
+    "data": df_clean,
+}
+
+save_model(artifact)
+```
+
+This creates a local copy in `models/`, updates `knn_baseline_model.pkl`, and uploads that file to `gs://$MODEL_BUCKET_NAME/$MODEL_BLOB_NAME`.
+
 ## Docker
 
 ```
@@ -97,5 +119,6 @@ APIs enabled for the project:
 - Artifact Registry API
 - Cloud Run Admin API
 - Secret Manager API
+- Cloud Storage API
 
 Production uses Secret Manager for `TOKEN_API_KEY`; do not commit `.env`.

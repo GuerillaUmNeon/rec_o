@@ -1,5 +1,7 @@
 raw_data/*
 __pycache__/
+app/__pycache__/
 *.pyc
 .env
-app/__pycache__
+*.pkl
+*.joblib
