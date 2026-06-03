@@ -63,7 +63,7 @@ uvicorn app.main:app --reload
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
 | GET | `/` | No | Health check (60 req/min per IP) |
-| POST | `/predict` | Yes | Artist/genre prediction (10 req/min per IP) |
+| POST | `/predict` | Yes | Nearest artist ID prediction (10 req/min per IP) |
 | POST | `/search/album` | Yes | Partial album title search (max 20) |
 | POST | `/search/artist` | Yes | Partial artist name search (max 20) |
 

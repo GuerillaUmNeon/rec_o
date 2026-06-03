@@ -1,13 +1,13 @@
-from datetime import datetime, timezone
-import math
 import os
 from pathlib import Path
 import tempfile
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError, TransportError
 from google.cloud import storage
 import joblib
-import pandas as pd
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
@@ -47,10 +47,14 @@ def _download_model_from_gcs() -> Path | None:
     bucket = client.bucket(MODEL_BUCKET_NAME)
     blob = bucket.blob(MODEL_BLOB_NAME)
 
-    if not blob.exists():
+    try:
+        if not blob.exists():
+            return None
+
+        blob.download_to_filename(CACHED_MODEL_PATH)
+    except (GoogleAPIError, GoogleAuthError, TransportError):
         return None
 
-    blob.download_to_filename(CACHED_MODEL_PATH)
     return CACHED_MODEL_PATH
 
 
@@ -67,7 +71,7 @@ def _upload_model_to_gcs(model_path: Path) -> None:
 def load_latest_model():
     global model
 
-    model_path = _download_model_from_gcs() or get_latest_model_path()
+    model_path = get_latest_model_path() or _download_model_from_gcs()
     if model_path is None:
         model = None
         return None
@@ -97,37 +101,11 @@ def save_model(trained_model, filename: str | None = None) -> Path:
     return model_path
 
 
-def _prediction_to_playlist(pred_result) -> tuple[str, str]:
-    if isinstance(pred_result, pd.Series):
-        pred_result = pred_result.to_list()
-    elif hasattr(pred_result, "tolist"):
-        pred_result = pred_result.tolist()
-
-    if isinstance(pred_result, dict):
-        return str(pred_result["artist_name"]), str(pred_result["artist_genre"])
-
-    if not isinstance(pred_result, (list, tuple)) or len(pred_result) < 2:
-        raise RuntimeError("Model prediction must contain an artist name and a genre.")
-
-    return str(pred_result[0]), str(pred_result[1])
-
-
-def _clean_value(value):
-    if value is None:
-        return None
-    if isinstance(value, float) and math.isnan(value):
-        return None
-    if pd.isna(value):
-        return None
-    return value
-
-
-def _recommend_from_artifact(
+def _recommend_artist_ids_from_artifact(
     artifact: dict,
-    artist_name: str,
-    genre_filter: str | None,
-    top_n: int = 1,
-) -> list[dict]:
+    artist_ids: list[int],
+    top_n: int,
+) -> list[int]:
     recommender = artifact["model"]
     vectorizer = artifact["vectorizer"]
     data = artifact.get("data")
@@ -141,72 +119,54 @@ def _recommend_from_artifact(
         )
 
     df_clean = data.copy()
-    df_clean["artist_name"] = df_clean["artist_name"].fillna("")
     df_clean["genres"] = df_clean["genres"].fillna("")
 
-    matches = df_clean[
-        df_clean["artist_name"].str.lower() == artist_name.lower()
-    ]
-    if matches.empty:
-        return []
+    seed_ids = {int(artist_id) for artist_id in artist_ids}
+    matches = df_clean[df_clean["artist_id"].isin(seed_ids)]
+    found_ids = {int(artist_id) for artist_id in matches["artist_id"].tolist()}
+    missing_ids = sorted(seed_ids - found_ids)
+    if missing_ids:
+        raise RuntimeError(f"Unknown artist IDs: {missing_ids}")
 
-    seed_index = matches.index[0]
-    seed_position = df_clean.index.get_loc(seed_index)
-    query_vector = vectorizer.transform([df_clean.iloc[seed_position]["genres"]])
-    n_neighbors = min(len(df_clean), top_n + 50)
+    query_vectors = vectorizer.transform(matches["genres"].astype(str))
+    if len(matches) == 1:
+        query_vector = query_vectors[0]
+    else:
+        query_vector = query_vectors.mean(axis=0).A
+
+    n_neighbors = min(len(df_clean), top_n + len(seed_ids) + 50)
     distances, indices = recommender.kneighbors(query_vector, n_neighbors=n_neighbors)
 
     recommendations = []
-    seed_artist_id = df_clean.iloc[seed_position]["artist_id"]
-
-    for distance, idx in zip(distances[0], indices[0]):
+    for idx in indices[0]:
         row = df_clean.iloc[idx]
+        artist_id = int(row["artist_id"])
 
-        if row["artist_id"] == seed_artist_id:
+        if artist_id in seed_ids or artist_id in recommendations:
             continue
 
-        if genre_filter:
-            genre = genre_filter.lower()
-            genres = str(row["genres"]).lower()
-            if genre not in genres:
-                continue
-
-        result = {
-            "artist_id": int(row["artist_id"]),
-            "artist_name": row["artist_name"],
-            "genres": row["genres"],
-            "similarity_score": round(float(1 - distance), 4),
-        }
-
-        for column in ("artist_gid", "artist_type", "area_name"):
-            if column in df_clean.columns:
-                result[column] = _clean_value(row[column])
-
-        recommendations.append(result)
-
+        recommendations.append(artist_id)
         if len(recommendations) >= top_n:
             break
 
     return recommendations
 
 
-def predict_playlist(artist_name: str, artist_genre: str) -> tuple[str, str]:
+def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
     if model is None:
         load_latest_model()
     if model is None:
         raise RuntimeError("No model saved yet. Train a model and call save_model(model).")
 
     if isinstance(model, dict):
-        recommendations = _recommend_from_artifact(model, artist_name, artist_genre)
+        recommendations = _recommend_artist_ids_from_artifact(model, artist_ids, top_n)
         if not recommendations:
-            raise RuntimeError("No recommendation found for this artist and genre.")
-        recommendation = recommendations[0]
-        return str(recommendation["artist_name"]), str(recommendation["genres"])
+            raise RuntimeError("No recommendation found for these artist IDs.")
+        return recommendations
 
-    data_dict = {
-        "artist_name": [artist_name],
-        "artist_genre": [artist_genre],
-    }
-    data_df = pd.DataFrame(data_dict)
-    pred_result = model.predict(data_df)[0]
-    return _prediction_to_playlist(pred_result)
+    pred_result = model.predict([artist_ids])[0]
+    if hasattr(pred_result, "tolist"):
+        pred_result = pred_result.tolist()
+    if not isinstance(pred_result, list):
+        pred_result = list(pred_result)
+    return [int(artist_id) for artist_id in pred_result[:top_n]]
