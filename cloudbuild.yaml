@@ -26,3 +26,7 @@ steps:
       - --allow-unauthenticated
       - --port=8000
       - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest
+      - --set-env-vars=MODEL_BUCKET_NAME=$_MODEL_BUCKET_NAME,MODEL_BLOB_NAME=models/knn_baseline_model.pkl
+
+substitutions:
+  _MODEL_BUCKET_NAME: rec-o-models

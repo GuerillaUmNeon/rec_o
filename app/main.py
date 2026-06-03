@@ -97,16 +97,20 @@ def predict(
     _: str = Depends(verify_api_key),
 ):
     """
-    Predict an artist and genre from user input.
+    Predict nearest artist IDs from one or more input artist IDs.
 
-    JSON body: ArtistName, Genre (see PlaylistInput).
+    JSON body: ArtistIds, TopN (see PlaylistInput).
     Requires the X-API-Key header.
     """
-    artist_name, artist_genre = predict_playlist(input.ArtistName, input.Genre)
-    return PlaylistOutput(
-        ArtistName=artist_name,
-        Genre=artist_genre
-    )
+    try:
+        artist_ids = predict_playlist(input.ArtistIds, input.TopN)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    return PlaylistOutput(ArtistIds=artist_ids)
 
 
 @app.post("/search/album", response_model=list[AlbumSearchOutput])
