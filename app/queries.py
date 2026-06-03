@@ -12,10 +12,7 @@ LIMIT 20;
 """
 
 ARTIST_SEARCH_QUERY = """
-SELECT
-    id,
-    name,
-    comment
+SELECT id, name, comment AS disambiguation
 FROM musicbrainz.artist
 WHERE name ILIKE %s
 LIMIT 20;
