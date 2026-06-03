@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import tempfile
 from datetime import datetime, timezone
-
+import pandas as pd
 from dotenv import load_dotenv
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import GoogleAuthError, TransportError
@@ -30,17 +30,6 @@ def _iter_saved_models() -> list[Path]:
         candidates.extend(MODEL_DIR.glob("*.pkl"))
         candidates.extend(MODEL_DIR.glob("*.joblib"))
     return candidates
-
-# TODO: remove predict_playlist when predict_artist is implemented
-def predict_playlist(artist_name: str, artist_genre: str) -> tuple[str, str]:
-    data_dict = {
-        'artist_name': [artist_name],
-        'artist_genre': [artist_genre],
-    }
-    data_df = pd.DataFrame(data_dict)
-    #pred_result = model.predict(data_df)[0]
-    pred_result = ('Celine Dion', 'Rock')
-    return pred_result
 
 def predict_artist(artist_ids, conn):
     """
@@ -70,7 +59,7 @@ def predict_artist(artist_ids, conn):
             artist.gid AS gid,
             artist.name AS name,
             genre.name AS genre,
-            url.url AS url,
+            url.url AS urls,
             link_type.id AS link_type_id
         FROM artist
         LEFT JOIN artist_tag
@@ -94,20 +83,20 @@ def predict_artist(artist_ids, conn):
     result = pd.read_sql_query(query, conn, params=artist_ids)
 
     if result.empty:
-        return pd.DataFrame(columns=["id", "gid", "name", "genre", "url"])
+        return pd.DataFrame(columns=["id", "gid", "name", "genre", "urls"])
 
     def agg_genres(series):
         return [g.capitalize() for g in series.dropna().unique().tolist()]
 
     def agg_urls(group):
         pairs = (
-            group[["url", "link_type_id"]]
-            .dropna(subset=["url", "link_type_id"])
+            group[["urls", "link_type_id"]]
+            .dropna(subset=["urls", "link_type_id"])
             .drop_duplicates()
             .to_dict("records")
         )
         return [
-            {"url": item["url"], "type": int(item["link_type_id"])}
+            {"url": item["urls"], "type": int(item["link_type_id"])}
             for item in pairs
         ]
 
@@ -115,7 +104,7 @@ def predict_artist(artist_ids, conn):
         result.groupby(["id", "gid", "name"], as_index=False)
               .apply(lambda g: pd.Series({
                   "genre": agg_genres(g["genre"]),
-                  "url": agg_urls(g)
+                  "urls": agg_urls(g)
               }))
               .reset_index(drop=True)
     )
@@ -240,7 +229,6 @@ def _recommend_artist_ids_from_artifact(
             break
 
     return recommendations
-
 
 def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
     if model is None:
