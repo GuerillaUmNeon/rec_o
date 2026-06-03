@@ -20,3 +20,12 @@ FROM musicbrainz.artist
 WHERE name ILIKE %s
 LIMIT 20;
 """
+
+GENRE_SEARCH_QUERY = """
+SELECT
+    id,
+    name
+FROM musicbrainz.genre
+WHERE name ILIKE %s
+LIMIT 20;
+"""
