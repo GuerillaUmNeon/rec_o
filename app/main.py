@@ -103,9 +103,8 @@ def predict(
     Requires the X-API-Key header.
     """
     try:
-        artist_ids = predict_playlist(input.ArtistIds, input.TopN)
-
         with get_connection() as conn:
+            artist_ids = predict_playlist(input.ArtistIds, input.TopN, conn=conn)
             artist_df = predict_artist(artist_ids, conn)
 
     except RuntimeError as exc:

@@ -31,6 +31,166 @@ def _iter_saved_models() -> list[Path]:
         candidates.extend(MODEL_DIR.glob("*.joblib"))
     return candidates
 
+
+def _sql_placeholders(values: list[int]) -> str:
+    return ",".join(["%s"] * len(values))
+
+
+def _ordered_unique(values) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        if pd.isna(value):
+            continue
+        normalized = str(value).strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def _release_group_genres_query(where_clause: str = "") -> str:
+    return f"""
+        SELECT id, genre
+        FROM (
+            SELECT
+                l_artist_release_group.entity0 AS id,
+                genre.name AS genre
+            FROM l_artist_release_group
+            JOIN release_group_tag
+                ON release_group_tag.release_group = l_artist_release_group.entity1
+               AND release_group_tag.count > 0
+            JOIN tag
+                ON tag.id = release_group_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+
+            UNION
+
+            SELECT
+                l_artist_release_group.entity0 AS id,
+                genre.name AS genre
+            FROM l_artist_release_group
+            JOIN release_group
+                ON release_group.id = l_artist_release_group.entity1
+            JOIN release
+                ON release.release_group = release_group.id
+            JOIN release_tag
+                ON release_tag.release = release.id
+               AND release_tag.count > 0
+            JOIN tag
+                ON tag.id = release_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+        ) release_group_genres
+        {where_clause}
+    """
+
+
+def _fetch_release_group_genres(artist_ids: list[int], conn) -> pd.DataFrame:
+    """Return genre names inferred from an artist's release groups."""
+    if not artist_ids:
+        return pd.DataFrame(columns=["id", "genre"])
+
+    placeholders = _sql_placeholders(artist_ids)
+    query = _release_group_genres_query(
+        f"WHERE release_group_genres.id IN ({placeholders})"
+    )
+
+    return pd.read_sql_query(query, conn, params=artist_ids)
+
+
+def fetch_artist_training_data(conn) -> pd.DataFrame:
+    """
+    Build artist features for KNN training without dropping artists that lack tags.
+
+    The first query gets artist metadata and artist-level tags. The second query
+    fills genre information from each artist's release groups, mirroring the
+    album feature source.
+    """
+    artist_query = """
+        SELECT
+            artist.id AS artist_id,
+            artist.gid AS artist_gid,
+            artist.name AS artist_name,
+            artist_type.name AS artist_type,
+            area.name AS area_name,
+            tag.name AS tag,
+            artist_tag.count AS tag_count,
+            genre.name AS genre
+        FROM artist
+        LEFT JOIN artist_type
+            ON artist_type.id = artist.type
+        LEFT JOIN area
+            ON area.id = artist.area
+        LEFT JOIN artist_tag
+            ON artist_tag.artist = artist.id
+           AND artist_tag.count > 0
+        LEFT JOIN tag
+            ON tag.id = artist_tag.tag
+        LEFT JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name)
+        WHERE artist.name IS NOT NULL
+          AND LOWER(artist.name) != 'various artists'
+    """
+
+    artist_rows = pd.read_sql_query(artist_query, conn)
+    if artist_rows.empty:
+        return pd.DataFrame(
+            columns=[
+                "artist_id",
+                "artist_gid",
+                "artist_name",
+                "artist_type",
+                "area_name",
+                "tags",
+                "genres",
+                "tag_count_sum",
+            ]
+        )
+
+    release_group_genres_query = _release_group_genres_query()
+    release_group_genres = pd.read_sql_query(release_group_genres_query, conn)
+
+    grouped = (
+        artist_rows.groupby(
+            ["artist_id", "artist_gid", "artist_name", "artist_type", "area_name"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            tags=("tag", lambda values: " ".join(_ordered_unique(values))),
+            tag_genres=("genre", lambda values: " ".join(_ordered_unique(values))),
+            tag_count_sum=("tag_count", lambda values: values.dropna().clip(lower=0).sum()),
+        )
+    )
+
+    if release_group_genres.empty:
+        grouped["release_group_genres"] = ""
+    else:
+        release_group_genres = (
+            release_group_genres.groupby("id", as_index=False)["genre"]
+            .agg(lambda values: " ".join(_ordered_unique(values)))
+            .rename(columns={"id": "artist_id", "genre": "release_group_genres"})
+        )
+        grouped = grouped.merge(release_group_genres, on="artist_id", how="left")
+        grouped["release_group_genres"] = grouped["release_group_genres"].fillna("")
+
+    grouped["genres"] = (
+        grouped["tag_genres"].fillna("")
+        + " "
+        + grouped["release_group_genres"].fillna("")
+    ).str.split().str.join(" ")
+    grouped = grouped.drop(columns=["tag_genres", "release_group_genres"])
+    grouped["tag_count_sum"] = grouped["tag_count_sum"].fillna(0)
+
+    return grouped
+
+
 def predict_artist(artist_ids, conn):
     """
     Return one row per artist with genres aggregated as a list.
@@ -51,7 +211,7 @@ def predict_artist(artist_ids, conn):
     if not artist_ids:
         return pd.DataFrame(columns=["id", "gid", "name", "genre", "url"])
 
-    placeholders = ",".join(["%s"] * len(artist_ids))
+    placeholders = _sql_placeholders(artist_ids)
 
     query = f"""
         SELECT
@@ -64,10 +224,11 @@ def predict_artist(artist_ids, conn):
         FROM artist
         LEFT JOIN artist_tag
             ON artist_tag.artist = artist.id
+           AND artist_tag.count > 0
         LEFT JOIN tag
             ON artist_tag.tag = tag.id
         LEFT JOIN genre
-            ON tag.name = genre.name
+            ON LOWER(tag.name) = LOWER(genre.name)
         LEFT JOIN l_artist_url
             ON l_artist_url.entity0 = artist.id
         LEFT JOIN url
@@ -77,7 +238,6 @@ def predict_artist(artist_ids, conn):
         LEFT JOIN link_type
             ON link_type.id = link.link_type
         WHERE artist.id IN ({placeholders})
-          AND artist_tag.count > 0
     """
 
     result = pd.read_sql_query(query, conn, params=artist_ids)
@@ -85,8 +245,24 @@ def predict_artist(artist_ids, conn):
     if result.empty:
         return pd.DataFrame(columns=["id", "gid", "name", "genre", "urls"])
 
-    def agg_genres(series):
-        return [g.capitalize() for g in series.dropna().unique().tolist()]
+    release_group_genres = _fetch_release_group_genres(artist_ids, conn)
+    if release_group_genres.empty:
+        fallback_genres_by_artist = {}
+    else:
+        fallback_genres_by_artist = (
+            release_group_genres.groupby("id")["genre"]
+            .apply(_ordered_unique)
+            .to_dict()
+        )
+
+    def agg_genres(artist_id, series):
+        genres = _ordered_unique(series)
+        genres.extend(
+            genre
+            for genre in fallback_genres_by_artist.get(artist_id, [])
+            if genre.lower() not in {existing.lower() for existing in genres}
+        )
+        return [genre.capitalize() for genre in genres]
 
     def agg_urls(group):
         pairs = (
@@ -103,13 +279,32 @@ def predict_artist(artist_ids, conn):
     grouped = (
         result.groupby(["id", "gid", "name"], as_index=False)
               .apply(lambda g: pd.Series({
-                  "genre": agg_genres(g["genre"]),
+                  "genre": agg_genres(int(g["id"].iloc[0]), g["genre"]),
                   "urls": agg_urls(g)
               }))
               .reset_index(drop=True)
     )
 
     return grouped
+
+
+def _fetch_seed_genres_from_release_groups(
+    missing_ids: list[int],
+    conn,
+) -> dict[int, str]:
+    if conn is None or not missing_ids:
+        return {}
+
+    release_group_genres = _fetch_release_group_genres(missing_ids, conn)
+    if release_group_genres.empty:
+        return {}
+
+    return (
+        release_group_genres.groupby("id")["genre"]
+        .agg(lambda values: " ".join(_ordered_unique(values)))
+        .to_dict()
+    )
+
 
 def get_latest_model_path() -> Path | None:
     saved_models = _iter_saved_models()
@@ -184,6 +379,7 @@ def _recommend_artist_ids_from_artifact(
     artifact: dict,
     artist_ids: list[int],
     top_n: int,
+    conn=None,
 ) -> list[int]:
     recommender = artifact["model"]
     vectorizer = artifact["vectorizer"]
@@ -204,11 +400,24 @@ def _recommend_artist_ids_from_artifact(
     matches = df_clean[df_clean["artist_id"].isin(seed_ids)]
     found_ids = {int(artist_id) for artist_id in matches["artist_id"].tolist()}
     missing_ids = sorted(seed_ids - found_ids)
-    if missing_ids:
-        raise RuntimeError(f"Unknown artist IDs: {missing_ids}")
+    fallback_genres_by_artist = _fetch_seed_genres_from_release_groups(missing_ids, conn)
+    still_missing_ids = sorted(
+        artist_id
+        for artist_id in missing_ids
+        if not fallback_genres_by_artist.get(artist_id, "").strip()
+    )
+    if still_missing_ids:
+        raise RuntimeError(f"Unknown artist IDs: {still_missing_ids}")
 
-    query_vectors = vectorizer.transform(matches["genres"].astype(str))
-    if len(matches) == 1:
+    seed_genres = matches["genres"].astype(str).tolist()
+    seed_genres.extend(
+        fallback_genres_by_artist[artist_id]
+        for artist_id in missing_ids
+        if fallback_genres_by_artist.get(artist_id, "").strip()
+    )
+
+    query_vectors = vectorizer.transform(seed_genres)
+    if len(seed_genres) == 1:
         query_vector = query_vectors[0]
     else:
         query_vector = query_vectors.mean(axis=0).A
@@ -230,14 +439,20 @@ def _recommend_artist_ids_from_artifact(
 
     return recommendations
 
-def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
+
+def predict_playlist(artist_ids: list[int], top_n: int = 5, conn=None) -> list[int]:
     if model is None:
         load_latest_model()
     if model is None:
         raise RuntimeError("No model saved yet. Train a model and call save_model(model).")
 
     if isinstance(model, dict):
-        recommendations = _recommend_artist_ids_from_artifact(model, artist_ids, top_n)
+        recommendations = _recommend_artist_ids_from_artifact(
+            model,
+            artist_ids,
+            top_n,
+            conn=conn,
+        )
         if not recommendations:
             raise RuntimeError("No recommendation found for these artist IDs.")
         return recommendations

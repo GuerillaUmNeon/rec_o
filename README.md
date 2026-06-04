@@ -82,7 +82,14 @@ The API loads the latest KNN recommender artifact from Google Cloud Storage when
 The final notebook model must be saved as an artifact containing the fitted vectorizer, fitted KNN model, and cleaned dataframe:
 
 ```python
-from app.predictor import save_model
+from app.database import get_connection
+from app.predictor import fetch_artist_training_data, save_model
+
+with get_connection() as conn:
+    df = fetch_artist_training_data(conn)
+
+# Use df as the notebook source, then keep the existing cleaning/training
+# steps to create df_clean, vectorizer, knn_model, and artist_names.
 
 artifact = {
     "vectorizer": vectorizer,
