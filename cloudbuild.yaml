@@ -1,3 +1,5 @@
+# Build/push: no secrets in the image (layers would leak them).
+# Deploy: Cloud Run mounts Secret Manager values as env vars at container startup.
 options:
   logging: CLOUD_LOGGING_ONLY
 
@@ -25,4 +27,10 @@ steps:
       - --region=europe-west1
       - --allow-unauthenticated
       - --port=8000
-      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest
+      - --vpc-connector=rec-o-connector
+      - --vpc-egress=all-traffic
+      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest
+      - --set-env-vars=MODEL_BUCKET_NAME=$_MODEL_BUCKET_NAME,MODEL_BLOB_NAME=models/knn_baseline_model.pkl
+
+substitutions:
+  _MODEL_BUCKET_NAME: rec-o-models

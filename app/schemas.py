@@ -1,15 +1,26 @@
-from operator import gt
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class PlaylistInput(BaseModel):
-    ArtistName: str = Field(..., min_length=1, max_length=255)
-    Genre: str = Field(..., min_length=1, max_length=255)
+    ArtistIds: list[int] = Field(..., min_length=1)
+    TopN: int = Field(default=5, ge=1, le=50)
+
+
+class ArtistUrl(BaseModel):
+    url: str
+    type: int
+
+
+class ArtistRow(BaseModel):
+    gid: UUID
+    name: str
+    genre: list[str]
+    urls: list[ArtistUrl]
 
 
 class PlaylistOutput(BaseModel):
-    ArtistName: str = Field(..., min_length=1, max_length=255)
-    Genre: str = Field(..., min_length=1, max_length=255)
+    artists: list[ArtistRow]
 
 
 class AlbumSearchInput(BaseModel):
@@ -19,6 +30,7 @@ class AlbumSearchInput(BaseModel):
 class AlbumSearchOutput(BaseModel):
     release_group_id: int
     title: str
+    artist: str
 
 
 class ArtistSearchInput(BaseModel):
@@ -26,5 +38,35 @@ class ArtistSearchInput(BaseModel):
 
 
 class ArtistSearchOutput(BaseModel):
-    id: int
+    artist_id: int
     name: str
+    disambiguation: str | None = None
+
+
+class GenreSearchInput(BaseModel):
+    genre_name: str = Field(..., min_length=1, max_length=255)
+
+
+class GenreSearchOutput(BaseModel):
+    genre_id: int
+    genre_name: str
+
+
+class AlbumPredictInput(BaseModel):
+    release_group_id: list[int] = Field(..., min_length=1)
+    genre_id: list[int] | None = None
+    response_length: int = Field(default=10, ge=1, le=50)
+    blacklist_release_group_id: list[int] | None = None
+
+
+class AlbumPredictRow(BaseModel):
+    gid: UUID
+    title: str
+    url: list[str]
+    genres: list[str]
+    length: int
+    tracks: list[str]
+
+
+class AlbumPredictOutput(BaseModel):
+    albums: list[AlbumPredictRow]
