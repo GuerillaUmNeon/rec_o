@@ -14,8 +14,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.database import fetch_all
-from app.predictor import predict_playlist
+from app.database import fetch_all, get_connection
+from app.predictor import predict_playlist, predict_artist
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
@@ -104,13 +104,19 @@ def predict(
     """
     try:
         artist_ids = predict_playlist(input.ArtistIds, input.TopN)
+
+        with get_connection() as conn:
+            artist_df = predict_artist(artist_ids, conn)
+
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
 
-    return PlaylistOutput(ArtistIds=artist_ids)
+    artist_df = artist_df[["gid", "name", "genre", "urls"]]
+
+    return PlaylistOutput(artists=artist_df.to_dict(orient="records"))
 
 
 @app.post("/search/album", response_model=list[AlbumSearchOutput])
