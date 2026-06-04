@@ -1,10 +1,16 @@
 # GCP setup steps
 
+API project: **`rec-o-gcp`** · region: **`europe-west1`** · service: **`rec-o-api`**
+
+Postgres usually runs in **another GCP project** (public IP). Cloud Run must use a **fixed egress IP** (NAT) so the DB firewall can allow it.
+
+---
+
 ## Step 1 — GCP project
 Create project `rec-o-gcp`, enable billing, select it in the console.
 
 ## Step 2 — Enable APIs
-Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Storage.
+Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Storage, **Compute Engine**, **Serverless VPC Access**.
 
 ## Step 3 — Artifact Registry
 Create Docker repo `rec-o` in `europe-west1`.
@@ -35,18 +41,102 @@ Create one secret per env var (secret **name** = variable name, value = same as 
 | `DB_USERNAME` | DB user |
 | `DB_PASSWORD` | DB password |
 | `DB_PORT` | DB port (e.g. `5432`) |
-| `DATABASE_URL` | Optional full URL; if set at runtime, overrides `POSTGRES` + `DATABASE` + credentials |
+| `DATABASE_URL` | Full URL; if set at runtime, overrides the vars above |
 
-Create `DATABASE_URL` in Secret Manager when you switch to a single connection string (placeholder value is fine until then).
+`DATABASE_URL` must be a valid `postgresql://user:pass@host:5432/db` string (no placeholder `ip` in the host).
 
-## Step 6 — `cloudbuild.yaml`
-Pipeline: build image → push → deploy Cloud Run `rec-o-api` with `--set-secrets` for all DB/API secrets (injected at **runtime**, not baked into the Docker image). `MODEL_BUCKET_NAME` / `MODEL_BLOB_NAME` stay as plain env vars. `options.logging: CLOUD_LOGGING_ONLY`. Commit and push to `main`.
+Secrets are mounted at **Cloud Run runtime** via `cloudbuild.yaml` — not baked into the Docker image.
 
-## Step 7 — Link GitHub
+## Step 6 — VPC, connector, Cloud NAT (fixed egress IP)
+
+One-time setup in **`rec-o-gcp`** so outbound traffic to the DB uses a stable IP.
+
+| Resource | Name |
+|----------|------|
+| VPC | `rec-o-vpc` |
+| Subnet | `rec-o-subnet` (`10.8.0.0/24`, `europe-west1`) |
+| Serverless VPC connector | `rec-o-connector` (`10.8.1.0/28`) |
+| Static regional IP | `rec-o-nat-ip` |
+| Router | `rec-o-router` |
+| Cloud NAT | `rec-o-nat` (pool: `rec-o-nat-ip`, all subnet ranges) |
+
+Example CLI (skip steps if resources already exist):
+
+```bash
+gcloud config set project rec-o-gcp
+
+gcloud compute networks create rec-o-vpc --subnet-mode=custom
+gcloud compute networks subnets create rec-o-subnet \
+  --network=rec-o-vpc --region=europe-west1 --range=10.8.0.0/24
+
+gcloud compute networks vpc-access connectors create rec-o-connector \
+  --region=europe-west1 --network=rec-o-vpc --range=10.8.1.0/28 \
+  --min-instances=2 --max-instances=3
+
+gcloud compute addresses create rec-o-nat-ip --region=europe-west1
+gcloud compute routers create rec-o-router --network=rec-o-vpc --region=europe-west1
+gcloud compute routers nats create rec-o-nat \
+  --router=rec-o-router --region=europe-west1 \
+  --nat-external-ip-pool=rec-o-nat-ip --nat-all-subnet-ip-ranges
+
+gcloud run services update rec-o-api \
+  --region=europe-west1 \
+  --vpc-connector=rec-o-connector \
+  --vpc-egress=all-traffic
+```
+
+**Get the egress IP** (give this to the DB team for firewall whitelist):
+
+```bash
+gcloud compute addresses describe rec-o-nat-ip \
+  --region=europe-west1 --format='get(address)'
+```
+
+Console: **VPC network** → **IP addresses** → `rec-o-nat-ip` → **External IP** (`europe-west1`).
+
+Example: `34.140.60.217` → firewall rule source: **`34.140.60.217/32`**, TCP **5432**.
+
+Cloud Run **ingress** URL is still `*.run.app` — that is not the IP used for DB whitelist.
+
+## Step 7 — Database project firewall (other GCP project)
+
+On the Postgres VM / VPC (DB project), allow **ingress** from the NAT IP only:
+
+- Source: `NAT_IP/32` (from Step 6)
+- Protocol: `tcp:5432`
+- Target: Postgres VM (network tag or service account)
+
+`DATABASE_URL` on Cloud Run still points at the DB host (e.g. `34.14.1.32`), not at the NAT IP.
+
+## Step 8 — `cloudbuild.yaml`
+Pipeline: build image → push → deploy Cloud Run `rec-o-api` with:
+
+- `--vpc-connector=rec-o-connector` and `--vpc-egress=all-traffic` (keep NAT on every deploy)
+- `--set-secrets` for all secrets in Step 5
+- `--set-env-vars` for `MODEL_BUCKET_NAME` / `MODEL_BLOB_NAME`
+- `options.logging: CLOUD_LOGGING_ONLY`
+
+Commit and push to `main`.
+
+## Step 9 — Link GitHub
 Cloud Build → Repositories → host connection → Connect GitHub (repo owner authorizes Cloud Build app on `rec_o`) → Link `GuerillaUmNeon/rec_o`.
 
-## Step 8 — Trigger
-Create `deploy-main`: push to `^main$`, config `cloudbuild.yaml`, custom service account, logging **Cloud Logging only**. Fix IAM: build SA (Run Admin, Artifact Registry Writer, Secret Accessor); runtime SA `...@compute` needs **Secret Accessor** on every secret listed above (`TOKEN_API_KEY`, `POSTGRES`, etc.).
+## Step 10 — Trigger
+Create `deploy-main`: push to `^main$`, config `cloudbuild.yaml`, custom service account, logging **Cloud Logging only**.
 
-## Step 9 — Deploy & test
-Push to `main` or Run trigger → build Success → URL in Cloud Run → `rec-o-api`.
+IAM:
+
+- **Cloud Build SA**: Run Admin, Artifact Registry Writer, Secret Accessor
+- **Cloud Run runtime SA** (`...@compute`): Secret Accessor on every secret in Step 5
+
+## Step 11 — Deploy & test
+
+1. Push to `main` or run trigger → build success.
+2. Service URL:
+   ```bash
+   gcloud run services describe rec-o-api --region=europe-west1 --format='value(status.url)'
+   ```
+3. `GET /` (no API key).
+4. `POST /search/artist` with header `X-API-Key` — confirms DB + NAT + firewall.
+
+If DB calls fail: check secret `DATABASE_URL`, NAT IP whitelisted on DB project, and Cloud Run annotations include `vpc-connector` + `vpc-egress=all-traffic`.
