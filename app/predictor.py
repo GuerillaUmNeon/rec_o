@@ -279,7 +279,7 @@ def predict_artist(artist_ids, conn):
     grouped = (
         result.groupby(["id", "gid", "name"], as_index=False)
               .apply(lambda g: pd.Series({
-                  "genre": agg_genres(int(g["id"].iloc[0]), g["genre"]),
+                  "genre": agg_genres(int(g.name[0]), g["genre"]),
                   "urls": agg_urls(g)
               }))
               .reset_index(drop=True)
