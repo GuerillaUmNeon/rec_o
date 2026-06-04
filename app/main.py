@@ -24,6 +24,9 @@ from app.queries import (
 from app.schemas import (
     AlbumSearchInput,
     AlbumSearchOutput,
+    AlbumPredictInput,
+    AlbumPredictOutput,
+    AlbumPredictRow,
     ArtistSearchInput,
     ArtistSearchOutput,
     GenreSearchInput,
@@ -117,6 +120,48 @@ def predict(
     artist_df = artist_df[["gid", "name", "genre", "urls"]]
 
     return PlaylistOutput(artists=artist_df.to_dict(orient="records"))
+
+
+@app.post("/predict/album", response_model=AlbumPredictOutput)
+def predict_album(
+    input: AlbumPredictInput,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Temporary mock endpoint for album recommendations.
+
+    Will be connected to the real recommendation model later.
+    """
+
+    mock_albums = [
+        AlbumPredictRow(
+            gid="123e4567-e89b-12d3-a456-426614174000",
+            title="Hybrid Theory",
+            url=["https://example.com/hybrid-theory"],
+            genres=["Nu metal", "Alternative rock"],
+            length=12,
+            tracks=[
+                "Papercut",
+                "One Step Closer",
+                "Crawling"
+            ]
+        ),
+        AlbumPredictRow(
+            gid="123e4567-e89b-12d3-a456-426614174001",
+            title="Meteora",
+            url=["https://example.com/meteora"],
+            genres=["Alternative rock"],
+            length=13,
+            tracks=[
+                "Somewhere I Belong",
+                "Numb",
+                "Faint"
+            ]
+        )
+    ]
+
+    return AlbumPredictOutput(albums=mock_albums)
+
 
 
 @app.post("/search/album", response_model=list[AlbumSearchOutput])
