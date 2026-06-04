@@ -50,3 +50,23 @@ class GenreSearchInput(BaseModel):
 class GenreSearchOutput(BaseModel):
     genre_id: int
     genre_name: str
+
+
+class AlbumPredictInput(BaseModel):
+    release_group_id: list[int] = Field(..., min_length=1)
+    genre_id: list[int] | None = None
+    response_length: int = Field(default=10, ge=1, le=50)
+    blacklist_release_group_id: list[int] | None = None
+
+
+class AlbumPredictRow(BaseModel):
+    gid: UUID
+    title: str
+    url: list[str]
+    genres: list[str]
+    length: int
+    tracks: list[str]
+
+
+class AlbumPredictOutput(BaseModel):
+    albums: list[AlbumPredictRow]
