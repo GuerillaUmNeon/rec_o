@@ -25,16 +25,28 @@ The artifact must contain:
 Give the Cloud Run runtime service account `Storage Object Viewer` on the bucket.
 
 ## Step 5 — Secret Manager
-Create secret `TOKEN_API_KEY` with the API token value.
+Create one secret per env var (secret **name** = variable name, value = same as local `.env`):
+
+| Secret | Used for |
+|--------|----------|
+| `TOKEN_API_KEY` | API auth |
+| `POSTGRES` | DB host |
+| `DATABASE` | DB name |
+| `DB_USERNAME` | DB user |
+| `DB_PASSWORD` | DB password |
+| `DB_PORT` | DB port (e.g. `5432`) |
+| `DATABASE_URL` | Optional full URL; if set at runtime, overrides `POSTGRES` + `DATABASE` + credentials |
+
+Create `DATABASE_URL` in Secret Manager when you switch to a single connection string (placeholder value is fine until then).
 
 ## Step 6 — `cloudbuild.yaml`
-Add pipeline at repo root: build → push image → deploy Cloud Run `rec-o-api` (port 8000, secret `TOKEN_API_KEY`, env var `MODEL_BUCKET_NAME`). Add `options.logging: CLOUD_LOGGING_ONLY`. Commit and push to `main`.
+Pipeline: build image → push → deploy Cloud Run `rec-o-api` with `--set-secrets` for all DB/API secrets (injected at **runtime**, not baked into the Docker image). `MODEL_BUCKET_NAME` / `MODEL_BLOB_NAME` stay as plain env vars. `options.logging: CLOUD_LOGGING_ONLY`. Commit and push to `main`.
 
 ## Step 7 — Link GitHub
 Cloud Build → Repositories → host connection → Connect GitHub (repo owner authorizes Cloud Build app on `rec_o`) → Link `GuerillaUmNeon/rec_o`.
 
 ## Step 8 — Trigger
-Create `deploy-main`: push to `^main$`, config `cloudbuild.yaml`, custom service account, logging **Cloud Logging only**. Fix IAM: build SA (Run Admin, Artifact Registry Writer, Secret Accessor); runtime SA `...@compute` needs Secret Accessor on `TOKEN_API_KEY`.
+Create `deploy-main`: push to `^main$`, config `cloudbuild.yaml`, custom service account, logging **Cloud Logging only**. Fix IAM: build SA (Run Admin, Artifact Registry Writer, Secret Accessor); runtime SA `...@compute` needs **Secret Accessor** on every secret listed above (`TOKEN_API_KEY`, `POSTGRES`, etc.).
 
 ## Step 9 — Deploy & test
 Push to `main` or Run trigger → build Success → URL in Cloud Run → `rec-o-api`.
