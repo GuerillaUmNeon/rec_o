@@ -1,0 +1,49 @@
+"""
+Save trained artifacts locally (no GCS).
+
+Copied from app/predictor.py (save only; upload is ml/scripts/upload_to_gcs.py).
+"""
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+import joblib
+
+from ml.config import (
+    LATEST_MODEL_PATH,
+    MODEL_DIR,
+    MODEL_LOCAL_FILENAME,
+    ML_OUTPUTS_DIR,
+)
+
+
+def save_artifact(artifact: dict, filename: str | None = None) -> Path:
+    """Dump artifact to ml/outputs, models/, and project root."""
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    ML_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    default_stem = Path(MODEL_LOCAL_FILENAME).stem
+    default_suffix = Path(MODEL_LOCAL_FILENAME).suffix or ".pkl"
+
+    if filename is None:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"{default_stem}_{timestamp}{default_suffix}"
+
+    model_path = MODEL_DIR / Path(filename).name
+    if model_path.suffix not in {".pkl", ".joblib"}:
+        model_path = model_path.with_suffix(default_suffix)
+
+    output_copy = ML_OUTPUTS_DIR / MODEL_LOCAL_FILENAME
+    canonical_path = MODEL_DIR / MODEL_LOCAL_FILENAME
+
+    joblib.dump(artifact, model_path)
+    joblib.dump(artifact, canonical_path)
+    joblib.dump(artifact, output_copy)
+    joblib.dump(artifact, LATEST_MODEL_PATH)
+
+    print(f"Saved locally: {model_path}")
+    print(f"Canonical copy: {canonical_path}")
+    print(f"Copy in outputs: {output_copy}")
+    print(f"Latest at project root: {LATEST_MODEL_PATH}")
+
+    return model_path

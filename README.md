@@ -41,7 +41,8 @@ Copy `.env.sample` to `.env` and fill in values:
 - `TOKEN_API_KEY` — API key for protected routes (see below)
 - `POSTGRES`, `DB_PORT`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD` — PostgreSQL (MusicBrainz)
 - Optional: `DATABASE_URL` overrides the variables above
-- `MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME` — Google Cloud Storage location for the recommender artifact
+- `MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME` — GCS bucket and object path for the recommender artifact (API + upload)
+- Optional (local ML only): `MODEL_LOCAL_FILENAME` — local `.pkl` name after `run_local` (use a `*_test*` name to avoid overwriting prod files). See [ml/README_ML.md](ml/README_ML.md).
 
 Generate a token:
 
@@ -102,6 +103,51 @@ save_model(artifact)
 ```
 
 This creates a local copy in `models/`, updates `knn_baseline_model.pkl`, and uploads that file to `gs://$MODEL_BUCKET_NAME/$MODEL_BLOB_NAME`.
+
+Offline training and upload (recommended): [ml/README_ML.md](ml/README_ML.md).
+
+### Upload to GCS — `.env` vs GCP credentials
+
+`upload_to_gcs` reads from `.env` **where** to upload (`MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME`) and **which local file** (`MODEL_LOCAL_FILENAME`). Example for a test artifact (does not overwrite prod on GCS if you keep the prod blob path on Cloud Run):
+
+```bash
+MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
+MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
+```
+
+Production Cloud Run still uses `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` from `cloudbuild.yaml` until you change that deploy config.
+
+**You cannot fix a 403 upload by putting only the GCP project name in `.env`.** The Google client library uses **Application Default Credentials** (ADC): your Google account or a service-account key file. A variable such as `GOOGLE_CLOUD_PROJECT=rec-o-gcp` does not switch away from another account (e.g. a Le Wagon service account) that lacks `storage.objects.create` on bucket `rec-o-models`.
+
+| In `.env` | Effect |
+|-----------|--------|
+| `MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME`, `MODEL_LOCAL_FILENAME` | Destination and local filename — yes |
+| GCP project name only | No — does not change which account authenticates |
+| `GOOGLE_APPLICATION_CREDENTIALS=/path/to/rec-o-sa-key.json` | Yes — if that key has **Storage Object Creator** (or Admin) on `rec-o-models` |
+
+**Fix 403 (wrong account, e.g. `le-wagon-data-bootcamp@...`):**
+
+```bash
+echo "$GOOGLE_APPLICATION_CREDENTIALS"   # must be empty for rec-o upload
+```
+
+If this prints a path to a Le Wagon JSON (e.g. `airy-cogency-493213-t4-....json`), a **new terminal will still fail** until you remove that export — often in `~/.zshrc` or `~/.bashrc`:
+
+```bash
+grep GOOGLE_APPLICATION_CREDENTIALS ~/.zshrc ~/.bashrc
+# Comment out or delete the export line, then: source ~/.zshrc
+```
+
+One-off in the current shell:
+
+```bash
+unset GOOGLE_APPLICATION_CREDENTIALS
+gcloud config set project rec-o-gcp
+gcloud auth application-default login
+python -m ml.scripts.upload_to_gcs
+```
+
+Expect: `Uploaded ... → gs://rec-o-models/models/knn_baseline_model_test.pkl` (or your `MODEL_BLOB_NAME`). If it still fails, ask a **rec-o-gcp** admin to grant your Google user **Storage Object Creator** on bucket `rec-o-models`.
 
 ## Docker
 
