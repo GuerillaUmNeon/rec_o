@@ -11,8 +11,8 @@ import argparse
 
 from app.database import get_connection
 from ml.artifact import save_artifact
-from ml.data import fetch_artist_training_data
-from ml.train import clean_training_frame, train_knn_artifact
+from ml.data import fetch_artist_recommender_training_data, fetch_artist_training_data
+from ml.train import build_artist_recommender_artifact
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,23 +43,31 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    use_scoped_fetch = args.limit is not None or args.skip_extended_genres
 
     with get_connection() as conn:
-        raw_df = fetch_artist_training_data(
-            conn,
-            max_artists=args.limit,
-            skip_extended_genres=args.skip_extended_genres,
-            use_cache=args.use_cache,
-            refresh_cache=args.refresh_cache,
-        )
+        if use_scoped_fetch:
+            raw_df = fetch_artist_training_data(
+                conn,
+                max_artists=args.limit,
+                skip_extended_genres=args.skip_extended_genres,
+                use_cache=args.use_cache,
+                refresh_cache=args.refresh_cache,
+            )
+        else:
+            raw_df = fetch_artist_recommender_training_data(
+                conn,
+                use_cache=args.use_cache,
+                refresh_cache=args.refresh_cache,
+            )
 
     if raw_df.empty:
         raise SystemExit("No training rows returned from the database.")
 
-    df_clean = clean_training_frame(raw_df)
-    print(f"Training rows after cleaning: {len(df_clean):,}")
+    print(f"Training rows: {len(raw_df):,}")
+    artifact = build_artist_recommender_artifact(raw_df)
+    print(f"Artifact rows (with genres): {len(artifact['data']):,}")
 
-    artifact = train_knn_artifact(df_clean)
     save_artifact(artifact)
     print("Done. Upload to GCS manually: python -m ml.scripts.upload_to_gcs")
 

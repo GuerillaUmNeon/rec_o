@@ -10,7 +10,8 @@ This folder is a **copy** of training logic from `app/predictor.py` and `noteboo
 ml/
   config.py            # paths, MODEL_BUCKET_NAME, ML_MAX_ARTISTS, ML_GENRE_CHUNK_SIZE
   data.py              # fetch_artist_training_data + SQL
-  train.py             # clean + TfidfVectorizer + NearestNeighbors
+  features.py          # genre tokens (aligned with app/predictor.py)
+  train.py             # build_artist_recommender_artifact (Tfidf + KNN)
   artifact.py          # local save only (no GCS)
   gcs_upload.py        # GCS upload helper
   scripts/
@@ -53,9 +54,13 @@ Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbu
 
 ## 1. Train and save locally
 
+**Full DB (same as `app/predictor.train_artist_recommender`)** — temp tables + genre tokens:
+
 ```bash
 python -m ml.scripts.run_local
 ```
+
+**Fast dev** — scoped SQL (`--limit` / `--skip-extended-genres`), same artifact format:
 
 **Fast dev (recommended):**
 
@@ -89,7 +94,7 @@ python -m ml.scripts.run_local --limit 20000 --use-cache --refresh-cache
 
 #### `training_features.pkl` (intermediate cache)
 
-**Not** the final model. It is a pandas DataFrame saved after the 2 SQL queries and aggregation in `fetch_artist_training_data`, **before** `clean_training_frame` and sklearn training.
+**Not** the final model. It is a pandas DataFrame saved after SQL fetch/aggregation, **before** `build_artist_recommender_artifact`.
 
 Typical columns: `artist_id`, `artist_name`, `genres`, `tags`, `tag_count_sum`, … — **one row per artist**.
 
@@ -104,7 +109,13 @@ Use it to iterate on training parameters without re-hitting the database.
 Pickled dict for the API:
 
 ```python
-{"vectorizer": ..., "model": ..., "artist_names": ..., "data": df_clean}
+{
+    "vectorizer": TfidfVectorizer,
+    "model": NearestNeighbors,
+    "artist_names": dict[int, str],  # artist_id -> name
+    "data": pd.DataFrame,
+    "genre_feature_format": "genre_token_unigram",
+}
 ```
 
 Produced only after training finishes. Upload this one to GCS with `upload_to_gcs`.

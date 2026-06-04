@@ -1,7 +1,7 @@
 """
 Fetch artist training features from MusicBrainz.
 
-Copied from app/predictor.py (training SQL only; source left unchanged).
+Aligned with app/predictor.py (genre tokens + recommender temp-table path).
 """
 
 import os
@@ -10,26 +10,10 @@ import time
 import pandas as pd
 
 from ml.config import ML_GENRE_CHUNK_SIZE, ML_MAX_ARTISTS, TRAINING_FEATURES_CACHE
+from ml.features import join_genre_feature_tokens, ordered_unique
 
 def _sql_values_placeholders(values: list[int]) -> str:
     return ",".join(["(%s)"] * len(values))
-
-
-def _ordered_unique(values) -> list[str]:
-    seen = set()
-    result = []
-    for value in values:
-        if pd.isna(value):
-            continue
-        normalized = str(value).strip()
-        if not normalized:
-            continue
-        key = normalized.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(normalized)
-    return result
 
 
 def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
@@ -571,8 +555,8 @@ def fetch_artist_training_data(
             dropna=False,
         )
         .agg(
-            tags=("tag", lambda values: " ".join(_ordered_unique(values))),
-            tag_genres=("genre", lambda values: " ".join(_ordered_unique(values))),
+            tags=("tag", lambda values: " ".join(ordered_unique(values))),
+            tag_genres=("genre", join_genre_feature_tokens),
             tag_count_sum=("tag_count", lambda values: values.dropna().clip(lower=0).sum()),
         )
     )
@@ -582,7 +566,7 @@ def fetch_artist_training_data(
     else:
         artist_genres = (
             artist_genres.groupby("id", as_index=False)["genre"]
-            .agg(lambda values: " ".join(_ordered_unique(values)))
+            .agg(join_genre_feature_tokens)
             .rename(columns={"id": "artist_id", "genre": "all_genres"})
         )
         grouped = grouped.merge(artist_genres, on="artist_id", how="left")
@@ -601,5 +585,284 @@ def fetch_artist_training_data(
         TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
         grouped.to_pickle(TRAINING_FEATURES_CACHE)
         print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
+
+    return grouped
+
+
+def fetch_artist_recommender_training_data(
+    conn,
+    *,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
+) -> pd.DataFrame:
+    """
+    Build genre-only artist features for the KNN recommender (temp tables).
+
+    Same pipeline as app/predictor.train_artist_recommender — full DB scan.
+    """
+    if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
+        print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")
+        return pd.read_pickle(TRAINING_FEATURES_CACHE)
+
+    setup_steps = [
+        """
+        DROP TABLE IF EXISTS rec_o_credited_release_groups;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_release_groups ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, release_group.id AS release_group_id
+        FROM artist_credit_name
+        JOIN release_group
+            ON release_group.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT artist_credit_name.artist AS id, release.release_group AS release_group_id
+        FROM artist_credit_name
+        JOIN release
+            ON release.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT l_artist_release_group.entity0 AS id, l_artist_release_group.entity1 AS release_group_id
+        FROM l_artist_release_group
+
+        UNION
+
+        SELECT l_artist_release.entity0 AS id, release.release_group AS release_group_id
+        FROM l_artist_release
+        JOIN release
+            ON release.id = l_artist_release.entity1;
+        """,
+        """
+        CREATE INDEX rec_o_credited_release_groups_id_idx
+            ON rec_o_credited_release_groups(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_release_groups_release_group_idx
+            ON rec_o_credited_release_groups(release_group_id);
+        """,
+        """
+        ANALYZE rec_o_credited_release_groups;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_credited_releases;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_releases ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, release.id AS release_id
+        FROM artist_credit_name
+        JOIN release
+            ON release.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT rec_o_credited_release_groups.id AS id, release.id AS release_id
+        FROM rec_o_credited_release_groups
+        JOIN release
+            ON release.release_group = rec_o_credited_release_groups.release_group_id
+
+        UNION
+
+        SELECT l_artist_release.entity0 AS id, l_artist_release.entity1 AS release_id
+        FROM l_artist_release;
+        """,
+        """
+        CREATE INDEX rec_o_credited_releases_id_idx
+            ON rec_o_credited_releases(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_releases_release_idx
+            ON rec_o_credited_releases(release_id);
+        """,
+        """
+        ANALYZE rec_o_credited_releases;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_primary_artist_genres;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_primary_artist_genres ON COMMIT DROP AS
+        SELECT artist_tag.artist AS id, genre.name AS genre
+        FROM artist_tag
+        JOIN tag
+            ON tag.id = artist_tag.tag
+        JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name)
+        WHERE artist_tag.count > 0
+
+        UNION
+
+        SELECT l_artist_genre.entity0 AS id, genre.name AS genre
+        FROM l_artist_genre
+        JOIN genre
+            ON genre.id = l_artist_genre.entity1
+
+        UNION
+
+        SELECT rec_o_credited_release_groups.id AS id, genre.name AS genre
+        FROM rec_o_credited_release_groups
+        JOIN release_group_tag
+            ON release_group_tag.release_group = rec_o_credited_release_groups.release_group_id
+           AND release_group_tag.count > 0
+        JOIN tag
+            ON tag.id = release_group_tag.tag
+        JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name)
+
+        UNION
+
+        SELECT rec_o_credited_releases.id AS id, genre.name AS genre
+        FROM rec_o_credited_releases
+        JOIN release_tag
+            ON release_tag.release = rec_o_credited_releases.release_id
+           AND release_tag.count > 0
+        JOIN tag
+            ON tag.id = release_tag.tag
+        JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name);
+        """,
+        """
+        CREATE INDEX rec_o_primary_artist_genres_id_idx
+            ON rec_o_primary_artist_genres(id);
+        """,
+        """
+        ANALYZE rec_o_primary_artist_genres;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_artists_without_primary_genres;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_artists_without_primary_genres ON COMMIT DROP AS
+        SELECT artist.id
+        FROM artist
+        WHERE artist.name IS NOT NULL
+          AND LOWER(artist.name) != 'various artists'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM rec_o_primary_artist_genres
+              WHERE rec_o_primary_artist_genres.id = artist.id
+          );
+        """,
+        """
+        CREATE INDEX rec_o_artists_without_primary_genres_id_idx
+            ON rec_o_artists_without_primary_genres(id);
+        """,
+        """
+        ANALYZE rec_o_artists_without_primary_genres;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_credited_recordings;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_recordings ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, recording.id AS recording_id
+        FROM artist_credit_name
+        JOIN rec_o_artists_without_primary_genres
+            ON rec_o_artists_without_primary_genres.id = artist_credit_name.artist
+        JOIN recording
+            ON recording.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT l_artist_recording.entity0 AS id, l_artist_recording.entity1 AS recording_id
+        FROM l_artist_recording
+        JOIN rec_o_artists_without_primary_genres
+            ON rec_o_artists_without_primary_genres.id = l_artist_recording.entity0;
+        """,
+        """
+        CREATE INDEX rec_o_credited_recordings_id_idx
+            ON rec_o_credited_recordings(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_recordings_recording_idx
+            ON rec_o_credited_recordings(recording_id);
+        """,
+        """
+        ANALYZE rec_o_credited_recordings;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_artist_training_genres;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_artist_training_genres ON COMMIT DROP AS
+        SELECT id, genre
+        FROM rec_o_primary_artist_genres
+
+        UNION
+
+        SELECT rec_o_credited_recordings.id AS id, genre.name AS genre
+        FROM rec_o_credited_recordings
+        JOIN recording_tag
+            ON recording_tag.recording = rec_o_credited_recordings.recording_id
+           AND recording_tag.count > 0
+        JOIN tag
+            ON tag.id = recording_tag.tag
+        JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name);
+        """,
+        """
+        CREATE INDEX rec_o_artist_training_genres_id_idx
+            ON rec_o_artist_training_genres(id);
+        """,
+        """
+        ANALYZE rec_o_artist_training_genres;
+        """,
+    ]
+
+    print("Building recommender training temp tables (full DB)...")
+    t0 = time.perf_counter()
+    for sql in setup_steps:
+        conn.execute(sql)
+
+    query = """
+        SELECT
+            artist.id AS artist_id,
+            artist.gid AS artist_gid,
+            artist.name AS artist_name,
+            artist_type.name AS artist_type,
+            area.name AS area_name,
+            ''::text AS tags,
+            ARRAY_AGG(DISTINCT rec_o_artist_training_genres.genre ORDER BY rec_o_artist_training_genres.genre) AS genre_names,
+            0::bigint AS tag_count_sum
+        FROM rec_o_artist_training_genres
+        JOIN artist
+            ON artist.id = rec_o_artist_training_genres.id
+        LEFT JOIN artist_type
+            ON artist_type.id = artist.type
+        LEFT JOIN area
+            ON area.id = artist.area
+        WHERE artist.name IS NOT NULL
+          AND LOWER(artist.name) != 'various artists'
+        GROUP BY
+            artist.id,
+            artist.gid,
+            artist.name,
+            artist_type.name,
+            area.name
+    """
+    grouped = pd.read_sql_query(query, conn)
+    print(f"Recommender training query done in {time.perf_counter() - t0:.1f}s")
+
+    if grouped.empty:
+        return pd.DataFrame(
+            columns=[
+                "artist_id",
+                "artist_gid",
+                "artist_name",
+                "artist_type",
+                "area_name",
+                "tags",
+                "genres",
+                "tag_count_sum",
+            ]
+        )
+
+    grouped["genres"] = grouped.pop("genre_names").apply(join_genre_feature_tokens)
+    grouped = grouped[grouped["genres"].str.strip() != ""].copy()
+
+    TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_pickle(TRAINING_FEATURES_CACHE)
+    print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
 
     return grouped
