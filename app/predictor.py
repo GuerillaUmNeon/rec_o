@@ -36,6 +36,10 @@ def _sql_placeholders(values: list[int]) -> str:
     return ",".join(["%s"] * len(values))
 
 
+def _sql_values_placeholders(values: list[int]) -> str:
+    return ",".join(["(%s)"] * len(values))
+
+
 def _ordered_unique(values) -> list[str]:
     seen = set()
     result = []
@@ -53,16 +57,166 @@ def _ordered_unique(values) -> list[str]:
     return result
 
 
-def _release_group_genres_query(where_clause: str = "") -> str:
+def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
+    has_artist_scope = selected_artists is not None
+    selected_artists_cte = ""
+    artist_credit_scope = ""
+    artist_tag_scope = ""
+    l_artist_genre_scope = ""
+    l_artist_release_group_scope = ""
+    l_artist_release_scope = ""
+    l_artist_recording_scope = ""
+    l_artist_work_scope = ""
+
+    if has_artist_scope:
+        values = _sql_values_placeholders(selected_artists)
+        selected_artists_cte = f"""
+        selected_artists(id) AS (
+            VALUES {values}
+        ),
+        """
+        artist_credit_scope = (
+            "JOIN selected_artists ON selected_artists.id = artist_credit_name.artist"
+        )
+        artist_tag_scope = (
+            "JOIN selected_artists ON selected_artists.id = artist_tag.artist"
+        )
+        l_artist_genre_scope = (
+            "JOIN selected_artists ON selected_artists.id = l_artist_genre.entity0"
+        )
+        l_artist_release_group_scope = (
+            "JOIN selected_artists ON selected_artists.id = l_artist_release_group.entity0"
+        )
+        l_artist_release_scope = (
+            "JOIN selected_artists ON selected_artists.id = l_artist_release.entity0"
+        )
+        l_artist_recording_scope = (
+            "JOIN selected_artists ON selected_artists.id = l_artist_recording.entity0"
+        )
+        l_artist_work_scope = (
+            "JOIN selected_artists ON selected_artists.id = l_artist_work.entity0"
+        )
+
     return f"""
-        SELECT id, genre
-        FROM (
+        WITH
+        {selected_artists_cte}
+        credited_release_groups AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                release_group.id AS release_group_id
+            FROM artist_credit_name
+            {artist_credit_scope}
+            JOIN release_group
+                ON release_group.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                artist_credit_name.artist AS id,
+                release.release_group AS release_group_id
+            FROM artist_credit_name
+            {artist_credit_scope}
+            JOIN release
+                ON release.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
             SELECT
                 l_artist_release_group.entity0 AS id,
-                genre.name AS genre
+                l_artist_release_group.entity1 AS release_group_id
             FROM l_artist_release_group
+            {l_artist_release_group_scope}
+
+            UNION
+
+            SELECT
+                l_artist_release.entity0 AS id,
+                release.release_group AS release_group_id
+            FROM l_artist_release
+            {l_artist_release_scope}
+            JOIN release
+                ON release.id = l_artist_release.entity1
+        ),
+        credited_releases AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                release.id AS release_id
+            FROM artist_credit_name
+            {artist_credit_scope}
+            JOIN release
+                ON release.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                credited_release_groups.id AS id,
+                release.id AS release_id
+            FROM credited_release_groups
+            JOIN release
+                ON release.release_group = credited_release_groups.release_group_id
+
+            UNION
+
+            SELECT
+                l_artist_release.entity0 AS id,
+                l_artist_release.entity1 AS release_id
+            FROM l_artist_release
+            {l_artist_release_scope}
+        ),
+        credited_recordings AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                recording.id AS recording_id
+            FROM artist_credit_name
+            {artist_credit_scope}
+            JOIN recording
+                ON recording.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                l_artist_recording.entity0 AS id,
+                l_artist_recording.entity1 AS recording_id
+            FROM l_artist_recording
+            {l_artist_recording_scope}
+        ),
+        credited_works AS (
+            SELECT
+                l_artist_work.entity0 AS id,
+                l_artist_work.entity1 AS work_id
+            FROM l_artist_work
+            {l_artist_work_scope}
+        ),
+        primary_artist_genres AS (
+            SELECT
+                artist_tag.artist AS id,
+                genre.name AS genre
+            FROM artist_tag
+            {artist_tag_scope}
+            JOIN tag
+                ON tag.id = artist_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+            WHERE artist_tag.count > 0
+
+            UNION
+
+            SELECT
+                l_artist_genre.entity0 AS id,
+                genre.name AS genre
+            FROM l_artist_genre
+            {l_artist_genre_scope}
+            JOIN genre
+                ON genre.id = l_artist_genre.entity1
+
+            UNION
+
+            SELECT
+                credited_release_groups.id AS id,
+                genre.name AS genre
+            FROM credited_release_groups
             JOIN release_group_tag
-                ON release_group_tag.release_group = l_artist_release_group.entity1
+                ON release_group_tag.release_group = credited_release_groups.release_group_id
                AND release_group_tag.count > 0
             JOIN tag
                 ON tag.id = release_group_tag.tag
@@ -72,36 +226,284 @@ def _release_group_genres_query(where_clause: str = "") -> str:
             UNION
 
             SELECT
-                l_artist_release_group.entity0 AS id,
+                credited_releases.id AS id,
                 genre.name AS genre
-            FROM l_artist_release_group
-            JOIN release_group
-                ON release_group.id = l_artist_release_group.entity1
-            JOIN release
-                ON release.release_group = release_group.id
+            FROM credited_releases
             JOIN release_tag
-                ON release_tag.release = release.id
+                ON release_tag.release = credited_releases.release_id
                AND release_tag.count > 0
             JOIN tag
                 ON tag.id = release_tag.tag
             JOIN genre
                 ON LOWER(genre.name) = LOWER(tag.name)
-        ) release_group_genres
-        {where_clause}
+        ),
+        fallback_artist_genres AS (
+            SELECT
+                credited_recordings.id AS id,
+                genre.name AS genre
+            FROM credited_recordings
+            JOIN recording_tag
+                ON recording_tag.recording = credited_recordings.recording_id
+               AND recording_tag.count > 0
+            JOIN tag
+                ON tag.id = recording_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+
+            UNION
+
+            SELECT
+                credited_works.id AS id,
+                genre.name AS genre
+            FROM credited_works
+            JOIN work_tag
+                ON work_tag.work = credited_works.work_id
+               AND work_tag.count > 0
+            JOIN tag
+                ON tag.id = work_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+        )
+        SELECT id, genre
+        FROM primary_artist_genres
+
+        UNION
+
+        SELECT fallback_artist_genres.id, fallback_artist_genres.genre
+        FROM fallback_artist_genres
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM primary_artist_genres
+            WHERE primary_artist_genres.id = fallback_artist_genres.id
+        )
     """
 
 
-def _fetch_release_group_genres(artist_ids: list[int], conn) -> pd.DataFrame:
-    """Return genre names inferred from an artist's release groups."""
+def _primary_artist_genres_query(artist_ids: list[int]) -> str:
+    selected_artists = _sql_values_placeholders(artist_ids)
+    return f"""
+        WITH
+        selected_artists(id) AS (
+            VALUES {selected_artists}
+        ),
+        credited_release_groups AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                release_group.id AS release_group_id
+            FROM artist_credit_name
+            JOIN selected_artists
+                ON selected_artists.id = artist_credit_name.artist
+            JOIN release_group
+                ON release_group.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                artist_credit_name.artist AS id,
+                release.release_group AS release_group_id
+            FROM artist_credit_name
+            JOIN selected_artists
+                ON selected_artists.id = artist_credit_name.artist
+            JOIN release
+                ON release.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                l_artist_release_group.entity0 AS id,
+                l_artist_release_group.entity1 AS release_group_id
+            FROM l_artist_release_group
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_release_group.entity0
+
+            UNION
+
+            SELECT
+                l_artist_release.entity0 AS id,
+                release.release_group AS release_group_id
+            FROM l_artist_release
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_release.entity0
+            JOIN release
+                ON release.id = l_artist_release.entity1
+        ),
+        credited_releases AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                release.id AS release_id
+            FROM artist_credit_name
+            JOIN selected_artists
+                ON selected_artists.id = artist_credit_name.artist
+            JOIN release
+                ON release.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                credited_release_groups.id AS id,
+                release.id AS release_id
+            FROM credited_release_groups
+            JOIN release
+                ON release.release_group = credited_release_groups.release_group_id
+
+            UNION
+
+            SELECT
+                l_artist_release.entity0 AS id,
+                l_artist_release.entity1 AS release_id
+            FROM l_artist_release
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_release.entity0
+        )
+        SELECT id, genre
+        FROM (
+            SELECT
+                artist_tag.artist AS id,
+                genre.name AS genre
+            FROM artist_tag
+            JOIN selected_artists
+                ON selected_artists.id = artist_tag.artist
+            JOIN tag
+                ON tag.id = artist_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+            WHERE artist_tag.count > 0
+
+            UNION
+
+            SELECT
+                l_artist_genre.entity0 AS id,
+                genre.name AS genre
+            FROM l_artist_genre
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_genre.entity0
+            JOIN genre
+                ON genre.id = l_artist_genre.entity1
+
+            UNION
+
+            SELECT
+                credited_release_groups.id AS id,
+                genre.name AS genre
+            FROM credited_release_groups
+            JOIN release_group_tag
+                ON release_group_tag.release_group = credited_release_groups.release_group_id
+               AND release_group_tag.count > 0
+            JOIN tag
+                ON tag.id = release_group_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+
+            UNION
+
+            SELECT
+                credited_releases.id AS id,
+                genre.name AS genre
+            FROM credited_releases
+            JOIN release_tag
+                ON release_tag.release = credited_releases.release_id
+               AND release_tag.count > 0
+            JOIN tag
+                ON tag.id = release_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+        ) primary_artist_genres
+    """
+
+
+def _fallback_artist_genres_query(artist_ids: list[int]) -> str:
+    selected_artists = _sql_values_placeholders(artist_ids)
+    return f"""
+        WITH
+        selected_artists(id) AS (
+            VALUES {selected_artists}
+        ),
+        credited_recordings AS (
+            SELECT
+                artist_credit_name.artist AS id,
+                recording.id AS recording_id
+            FROM artist_credit_name
+            JOIN selected_artists
+                ON selected_artists.id = artist_credit_name.artist
+            JOIN recording
+                ON recording.artist_credit = artist_credit_name.artist_credit
+
+            UNION
+
+            SELECT
+                l_artist_recording.entity0 AS id,
+                l_artist_recording.entity1 AS recording_id
+            FROM l_artist_recording
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_recording.entity0
+        ),
+        credited_works AS (
+            SELECT
+                l_artist_work.entity0 AS id,
+                l_artist_work.entity1 AS work_id
+            FROM l_artist_work
+            JOIN selected_artists
+                ON selected_artists.id = l_artist_work.entity0
+        )
+        SELECT id, genre
+        FROM (
+            SELECT
+                credited_recordings.id AS id,
+                genre.name AS genre
+            FROM credited_recordings
+            JOIN recording_tag
+                ON recording_tag.recording = credited_recordings.recording_id
+               AND recording_tag.count > 0
+            JOIN tag
+                ON tag.id = recording_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+
+            UNION
+
+            SELECT
+                credited_works.id AS id,
+                genre.name AS genre
+            FROM credited_works
+            JOIN work_tag
+                ON work_tag.work = credited_works.work_id
+               AND work_tag.count > 0
+            JOIN tag
+                ON tag.id = work_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+        ) fallback_artist_genres
+    """
+
+
+def _fetch_artist_genres(artist_ids: list[int], conn) -> pd.DataFrame:
+    """Return genre names, using recording/work tags only as a last resort."""
     if not artist_ids:
         return pd.DataFrame(columns=["id", "genre"])
 
-    placeholders = _sql_placeholders(artist_ids)
-    query = _release_group_genres_query(
-        f"WHERE release_group_genres.id IN ({placeholders})"
+    primary_genres = pd.read_sql_query(
+        _primary_artist_genres_query(artist_ids),
+        conn,
+        params=artist_ids,
     )
+    found_ids = set(primary_genres["id"].astype(int).tolist())
+    missing_ids = [
+        artist_id
+        for artist_id in artist_ids
+        if int(artist_id) not in found_ids
+    ]
+    if not missing_ids:
+        return primary_genres
 
-    return pd.read_sql_query(query, conn, params=artist_ids)
+    fallback_genres = pd.read_sql_query(
+        _fallback_artist_genres_query(missing_ids),
+        conn,
+        params=missing_ids,
+    )
+    if fallback_genres.empty:
+        return primary_genres
+
+    return pd.concat([primary_genres, fallback_genres], ignore_index=True)
 
 
 def fetch_artist_training_data(conn) -> pd.DataFrame:
@@ -109,8 +511,8 @@ def fetch_artist_training_data(conn) -> pd.DataFrame:
     Build artist features for KNN training without dropping artists that lack tags.
 
     The first query gets artist metadata and artist-level tags. The second query
-    fills genre information from each artist's release groups, mirroring the
-    album feature source.
+    keeps every artist that has a genre from artist, release group, or release
+    tags.
     """
     artist_query = """
         SELECT
@@ -153,8 +555,8 @@ def fetch_artist_training_data(conn) -> pd.DataFrame:
             ]
         )
 
-    release_group_genres_query = _release_group_genres_query()
-    release_group_genres = pd.read_sql_query(release_group_genres_query, conn)
+    artist_genres_query = _artist_genres_query()
+    artist_genres = pd.read_sql_query(artist_genres_query, conn)
 
     grouped = (
         artist_rows.groupby(
@@ -169,23 +571,24 @@ def fetch_artist_training_data(conn) -> pd.DataFrame:
         )
     )
 
-    if release_group_genres.empty:
-        grouped["release_group_genres"] = ""
+    if artist_genres.empty:
+        grouped["all_genres"] = ""
     else:
-        release_group_genres = (
-            release_group_genres.groupby("id", as_index=False)["genre"]
+        artist_genres = (
+            artist_genres.groupby("id", as_index=False)["genre"]
             .agg(lambda values: " ".join(_ordered_unique(values)))
-            .rename(columns={"id": "artist_id", "genre": "release_group_genres"})
+            .rename(columns={"id": "artist_id", "genre": "all_genres"})
         )
-        grouped = grouped.merge(release_group_genres, on="artist_id", how="left")
-        grouped["release_group_genres"] = grouped["release_group_genres"].fillna("")
+        grouped = grouped.merge(artist_genres, on="artist_id", how="left")
+        grouped["all_genres"] = grouped["all_genres"].fillna("")
 
     grouped["genres"] = (
         grouped["tag_genres"].fillna("")
         + " "
-        + grouped["release_group_genres"].fillna("")
+        + grouped["all_genres"].fillna("")
     ).str.split().str.join(" ")
-    grouped = grouped.drop(columns=["tag_genres", "release_group_genres"])
+    grouped = grouped[grouped["genres"].str.strip() != ""].copy()
+    grouped = grouped.drop(columns=["tag_genres", "all_genres"])
     grouped["tag_count_sum"] = grouped["tag_count_sum"].fillna(0)
 
     return grouped
@@ -245,12 +648,12 @@ def predict_artist(artist_ids, conn):
     if result.empty:
         return pd.DataFrame(columns=["id", "gid", "name", "genre", "urls"])
 
-    release_group_genres = _fetch_release_group_genres(artist_ids, conn)
-    if release_group_genres.empty:
+    artist_genres = _fetch_artist_genres(artist_ids, conn)
+    if artist_genres.empty:
         fallback_genres_by_artist = {}
     else:
         fallback_genres_by_artist = (
-            release_group_genres.groupby("id")["genre"]
+            artist_genres.groupby("id")["genre"]
             .apply(_ordered_unique)
             .to_dict()
         )
@@ -295,12 +698,12 @@ def _fetch_seed_genres_from_release_groups(
     if conn is None or not missing_ids:
         return {}
 
-    release_group_genres = _fetch_release_group_genres(missing_ids, conn)
-    if release_group_genres.empty:
+    artist_genres = _fetch_artist_genres(missing_ids, conn)
+    if artist_genres.empty:
         return {}
 
     return (
-        release_group_genres.groupby("id")["genre"]
+        artist_genres.groupby("id")["genre"]
         .agg(lambda values: " ".join(_ordered_unique(values)))
         .to_dict()
     )
