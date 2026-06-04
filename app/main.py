@@ -135,7 +135,8 @@ def search_album(
     return [
         AlbumSearchOutput(
             release_group_id=row[0],
-            title=row[1]
+            title=row[1],
+            artist=row[2]
         )
         for row in rows
     ]
