@@ -49,7 +49,7 @@ MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
 
 Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — your local `.env` test values do not change prod until you upload to the prod blob path.
 
-**Note:** `app/predictor.py` still looks for `knn_baseline_model.pkl` at the **project root** first (legacy). ML training no longer writes there. For local API tests, copy or symlink from `models/` to the root, or point the API at `models/` (not wired by default).
+**Local API with the test model:** put `knn_baseline_model_test.pkl` in `models/` (after `run_local`) and set `MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl` in `.env` for GCS fallback. `app/predictor.py` picks the **newest** `.pkl` in `models/` (or `knn_baseline_model.pkl` at project root). To force the test file, remove/rename other `.pkl` in `models/` or copy the test artifact to `knn_baseline_model.pkl` at the project root.
 
 ## 1. Train and save locally
 
