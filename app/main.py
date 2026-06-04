@@ -89,7 +89,7 @@ def read_root(request: Request):
     return {"message": "Hello, World!"}
 
 
-@app.post("/predict", response_model=PlaylistOutput)
+@app.post("/predict/artist", response_model=PlaylistOutput)
 @limiter.limit("10/minute")
 def predict(
     request: Request,
