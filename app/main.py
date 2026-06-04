@@ -24,6 +24,9 @@ from app.queries import (
 from app.schemas import (
     AlbumSearchInput,
     AlbumSearchOutput,
+    AlbumPredictInput,
+    AlbumPredictOutput,
+    AlbumPredictRow,
     ArtistSearchInput,
     ArtistSearchOutput,
     GenreSearchInput,
@@ -89,7 +92,6 @@ def read_root(request: Request):
     return {"message": "Hello, World!"}
 
 
-@app.post("/predict", response_model=PlaylistOutput)
 @app.post("/predict/artist", response_model=PlaylistOutput)
 @limiter.limit("10/minute")
 def predict(
@@ -119,6 +121,48 @@ def predict(
     return PlaylistOutput(artists=artist_df.to_dict(orient="records"))
 
 
+@app.post("/predict/album", response_model=AlbumPredictOutput)
+def predict_album(
+    input: AlbumPredictInput,
+    _: str = Depends(verify_api_key),
+):
+    """
+    Temporary mock endpoint for album recommendations.
+
+    Will be connected to the real recommendation model later.
+    """
+
+    mock_albums = [
+        AlbumPredictRow(
+            gid="123e4567-e89b-12d3-a456-426614174000",
+            title="Hybrid Theory",
+            url=["https://example.com/hybrid-theory"],
+            genres=["Nu metal", "Alternative rock"],
+            length=12,
+            tracks=[
+                "Papercut",
+                "One Step Closer",
+                "Crawling"
+            ]
+        ),
+        AlbumPredictRow(
+            gid="123e4567-e89b-12d3-a456-426614174001",
+            title="Meteora",
+            url=["https://example.com/meteora"],
+            genres=["Alternative rock"],
+            length=13,
+            tracks=[
+                "Somewhere I Belong",
+                "Numb",
+                "Faint"
+            ]
+        )
+    ]
+
+    return AlbumPredictOutput(albums=mock_albums)
+
+
+
 @app.post("/search/album", response_model=list[AlbumSearchOutput])
 def search_album(
     input: AlbumSearchInput,
@@ -135,7 +179,8 @@ def search_album(
     return [
         AlbumSearchOutput(
             release_group_id=row[0],
-            title=row[1]
+            title=row[1],
+            artist=row[2]
         )
         for row in rows
     ]
