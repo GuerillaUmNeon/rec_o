@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
         "--path",
         type=str,
         default=None,
-        help="Path to .pkl (default: MODEL_LOCAL_FILENAME at project root or ml/outputs/).",
+        help="Path to .pkl (default: models/ then ml/outputs/ MODEL_LOCAL_FILENAME).",
     )
     return parser.parse_args()
 

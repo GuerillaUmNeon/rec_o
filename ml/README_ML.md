@@ -44,12 +44,12 @@ MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
 
 | Variable | Used by | Prod value |
 |----------|---------|------------|
-| `MODEL_LOCAL_FILENAME` | `run_local` saves (root, `models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
+| `MODEL_LOCAL_FILENAME` | `run_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
 | `MODEL_BLOB_NAME` | `upload_to_gcs` only | `models/knn_baseline_model.pkl` |
 
 Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — your local `.env` test values do not change prod until you upload to the prod blob path.
 
-**Note:** `app/predictor.py` still loads `knn_baseline_model.pkl` at the project root by default. For local API tests with a test model, either set `MODEL_LOCAL_FILENAME=knn_baseline_model.pkl` temporarily or align the filename you want the API to read (prod name).
+**Note:** `app/predictor.py` still looks for `knn_baseline_model.pkl` at the **project root** first (legacy). ML training no longer writes there. For local API tests, copy or symlink from `models/` to the root, or point the API at `models/` (not wired by default).
 
 ## 1. Train and save locally
 
@@ -83,9 +83,9 @@ python -m ml.scripts.run_local --limit 20000 --use-cache --refresh-cache
 | File | What it is |
 |------|------------|
 | `ml/outputs/training_features.pkl` | **SQL cache** — see below |
-| `ml/outputs/knn_baseline_model.pkl` | **Trained model** (copy for convenience) |
-| `models/knn_baseline_model_<timestamp>.pkl` | Trained model (timestamped backup) |
-| `knn_baseline_model.pkl` (project root) | Trained model (same name the API / GCS expect) |
+| `models/<MODEL_LOCAL_FILENAME>` | **Trained model** (canonical; used by `upload_to_gcs` by default) |
+| `ml/outputs/<MODEL_LOCAL_FILENAME>` | Same artifact (convenience copy) |
+| `models/<stem>_<timestamp>.pkl` | Timestamped backup per run |
 
 #### `training_features.pkl` (intermediate cache)
 
@@ -125,7 +125,7 @@ Custom path:
 python -m ml.scripts.upload_to_gcs --path ml/outputs/knn_baseline_model_test.pkl
 ```
 
-Default lookup (no `--path`): `MODEL_LOCAL_FILENAME` at project root, then `ml/outputs/<MODEL_LOCAL_FILENAME>` (from `.env`).
+Default lookup (no `--path`): `models/<MODEL_LOCAL_FILENAME>`, then `ml/outputs/<MODEL_LOCAL_FILENAME>` (from `.env`).
 
 ### `.env` vs GCP credentials
 

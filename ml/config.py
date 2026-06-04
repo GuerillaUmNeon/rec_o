@@ -11,7 +11,7 @@ MODEL_DIR = PROJECT_ROOT / "models"
 
 # Prod default: knn_baseline_model.pkl — override in .env for local/test work
 MODEL_LOCAL_FILENAME = os.getenv("MODEL_LOCAL_FILENAME", "knn_baseline_model.pkl")
-LATEST_MODEL_PATH = PROJECT_ROOT / MODEL_LOCAL_FILENAME
+CANONICAL_MODEL_PATH = MODEL_DIR / MODEL_LOCAL_FILENAME
 
 MODEL_BUCKET_NAME = os.getenv("MODEL_BUCKET_NAME")
 MODEL_BLOB_NAME = os.getenv(

@@ -7,7 +7,7 @@ from google.auth.exceptions import GoogleAuthError, TransportError
 from google.cloud import storage
 
 from ml.config import (
-    LATEST_MODEL_PATH,
+    CANONICAL_MODEL_PATH,
     MODEL_BLOB_NAME,
     MODEL_BUCKET_NAME,
     MODEL_LOCAL_FILENAME,
@@ -23,7 +23,7 @@ def resolve_model_path(path: str | None) -> Path:
         return model_path
 
     for candidate in (
-        LATEST_MODEL_PATH,
+        CANONICAL_MODEL_PATH,
         ML_OUTPUTS_DIR / MODEL_LOCAL_FILENAME,
     ):
         if candidate.is_file():

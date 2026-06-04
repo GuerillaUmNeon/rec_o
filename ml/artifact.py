@@ -10,7 +10,7 @@ from pathlib import Path
 import joblib
 
 from ml.config import (
-    LATEST_MODEL_PATH,
+    CANONICAL_MODEL_PATH,
     MODEL_DIR,
     MODEL_LOCAL_FILENAME,
     ML_OUTPUTS_DIR,
@@ -18,7 +18,7 @@ from ml.config import (
 
 
 def save_artifact(artifact: dict, filename: str | None = None) -> Path:
-    """Dump artifact to ml/outputs, models/, and project root."""
+    """Dump artifact to models/ (canonical + timestamped) and ml/outputs/."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     ML_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -34,16 +34,13 @@ def save_artifact(artifact: dict, filename: str | None = None) -> Path:
         model_path = model_path.with_suffix(default_suffix)
 
     output_copy = ML_OUTPUTS_DIR / MODEL_LOCAL_FILENAME
-    canonical_path = MODEL_DIR / MODEL_LOCAL_FILENAME
 
     joblib.dump(artifact, model_path)
-    joblib.dump(artifact, canonical_path)
+    joblib.dump(artifact, CANONICAL_MODEL_PATH)
     joblib.dump(artifact, output_copy)
-    joblib.dump(artifact, LATEST_MODEL_PATH)
 
     print(f"Saved locally: {model_path}")
-    print(f"Canonical copy: {canonical_path}")
+    print(f"Canonical copy: {CANONICAL_MODEL_PATH}")
     print(f"Copy in outputs: {output_copy}")
-    print(f"Latest at project root: {LATEST_MODEL_PATH}")
 
     return model_path
