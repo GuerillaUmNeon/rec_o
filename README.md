@@ -80,27 +80,21 @@ In Swagger, use **Authorize** and enter the same value.
 
 The API loads the latest KNN recommender artifact from Google Cloud Storage when `MODEL_BUCKET_NAME` is configured.
 
-The final notebook model must be saved as an artifact containing the fitted vectorizer, fitted KNN model, and cleaned dataframe:
+The final model must be saved as an artifact containing the fitted vectorizer, fitted KNN model, and cleaned dataframe:
 
 ```python
 from app.database import get_connection
-from app.predictor import fetch_artist_training_data, save_model
+from app.predictor import save_model, train_artist_recommender
 
 with get_connection() as conn:
-    df = fetch_artist_training_data(conn)
-
-# Use df as the notebook source, then keep the existing cleaning/training
-# steps to create df_clean, vectorizer, knn_model, and artist_names.
-
-artifact = {
-    "vectorizer": vectorizer,
-    "model": knn_model,
-    "artist_names": artist_names,
-    "data": df_clean,
-}
+    artifact = train_artist_recommender(conn)
 
 save_model(artifact)
 ```
+
+Artist genres are normalized before training so each MusicBrainz genre is one
+TF-IDF feature: `east coast hip hop` becomes `east_coast_hip_hop`. The vectorizer
+uses `ngram_range=(1, 1)`, so similarities are computed genre by genre.
 
 This creates a local copy in `models/`, updates `knn_baseline_model.pkl`, and uploads that file to `gs://$MODEL_BUCKET_NAME/$MODEL_BLOB_NAME`.
 
