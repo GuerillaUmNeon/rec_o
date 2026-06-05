@@ -97,7 +97,8 @@ gcloud config set project rec-o-gcp
 gcloud auth application-default login
 ```
 
-On **Cloud Run**, the service account is configured automatically (no `gcloud login`).
+On **Cloud Run**, the service account is configured automatically (no `gcloud login`).  
+`MODEL_BUCKET_NAME` and `MODEL_BLOB_NAME` come from **Secret Manager** (mounted at deploy) — update the secrets and deploy a new revision to switch models without rebuilding the image.
 
 ## Check which model is active
 

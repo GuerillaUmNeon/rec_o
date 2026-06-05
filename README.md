@@ -92,4 +92,4 @@ APIs enabled for the project:
 
 Production: create matching secrets in Secret Manager (`TOKEN_API_KEY`, `POSTGRES`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_PORT`, `DATABASE_URL`); `cloudbuild.yaml` mounts them on Cloud Run at deploy time. Do not commit `.env`.
 
-Prod model path: `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` (set in `cloudbuild.yaml`). Use test blob names in local `.env` to avoid overwriting prod on GCS.
+Prod model path: Secret Manager `MODEL_BLOB_NAME` (default `models/knn_baseline_model.pkl`). Use test blob names in local `.env` to avoid overwriting prod on GCS.

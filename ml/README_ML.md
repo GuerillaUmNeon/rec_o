@@ -48,7 +48,7 @@ MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
 | `MODEL_LOCAL_FILENAME` | `run_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
 | `MODEL_BLOB_NAME` | `upload_to_gcs` (+ API download if same `.env`) | `models/knn_baseline_model.pkl` |
 
-Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — your local `.env` test values do not change prod until you upload to the prod blob path.
+Cloud Run prod reads `MODEL_BLOB_NAME` from Secret Manager (default `models/knn_baseline_model.pkl`) — your local `.env` test values do not change prod until you upload to the prod blob path and update the secret.
 
 **Run the API with the test model:** after `run_local`, upload with `upload_to_gcs` or set `MODEL_LOCAL_PATH` — see [app/README_APP.md](../app/README_APP.md).
 
@@ -171,7 +171,7 @@ python -m ml.scripts.upload_to_gcs
 
 Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/knn_baseline_model_test.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
 
-Production Cloud Run keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — local test values in `.env` do not change prod until you upload to the prod blob path.
+Production Cloud Run reads `MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
 
 ## Why training is slow (full run, no `--limit`)
 

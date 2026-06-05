@@ -29,8 +29,4 @@ steps:
       - --port=8000
       - --vpc-connector=rec-o-connector
       - --vpc-egress=all-traffic
-      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest
-      - --set-env-vars=MODEL_BUCKET_NAME=$_MODEL_BUCKET_NAME,MODEL_BLOB_NAME=models/knn_baseline_model.pkl
-
-substitutions:
-  _MODEL_BUCKET_NAME: rec-o-models
+      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest,MODEL_BUCKET_NAME=MODEL_BUCKET_NAME:latest,MODEL_BLOB_NAME=MODEL_BLOB_NAME:latest

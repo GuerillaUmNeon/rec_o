@@ -33,19 +33,29 @@ Give the Cloud Run runtime service account `Storage Object Viewer` on the bucket
 ## Step 5 — Secret Manager
 Create one secret per env var (secret **name** = variable name, value = same as local `.env`):
 
-| Secret | Used for |
-|--------|----------|
-| `TOKEN_API_KEY` | API auth |
-| `POSTGRES` | DB host |
-| `DATABASE` | DB name |
-| `DB_USERNAME` | DB user |
-| `DB_PASSWORD` | DB password |
-| `DB_PORT` | DB port (e.g. `5432`) |
-| `DATABASE_URL` | Full URL; if set at runtime, overrides the vars above |
+| Secret | Used for | Example value |
+|--------|----------|---------------|
+| `TOKEN_API_KEY` | API auth | (generated token) |
+| `POSTGRES` | DB host | VM IP |
+| `DATABASE` | DB name | `musicbrainz` |
+| `DB_USERNAME` | DB user | `rec_o` |
+| `DB_PASSWORD` | DB password | (password) |
+| `DB_PORT` | DB port | `5432` |
+| `DATABASE_URL` | Full URL; if set at runtime, overrides the vars above | `postgresql://...` |
+| `MODEL_BUCKET_NAME` | GCS bucket for the recommender artifact | `rec-o-models` |
+| `MODEL_BLOB_NAME` | GCS object path (change to switch model without rebuilding the image) | `models/knn_baseline_model.pkl` |
 
 `DATABASE_URL` must be a valid `postgresql://user:pass@host:5432/db` string (no placeholder `ip` in the host).
 
 Secrets are mounted at **Cloud Run runtime** via `cloudbuild.yaml` — not baked into the Docker image.
+
+`MODEL_*` values are configuration (not credentials), but Secret Manager lets you change the active model path without editing `cloudbuild.yaml` or rebuilding the Docker image.
+
+**Switch model in production:**
+
+1. Upload the new `.pkl` to GCS (`python -m ml.scripts.upload_to_gcs`).
+2. Update secret `MODEL_BLOB_NAME` in Secret Manager (e.g. `models/knn_baseline_model_v2.pkl`).
+3. Deploy a new Cloud Run revision (re-run the Cloud Build trigger, or **Edit & deploy new revision** in the console — no image rebuild required).
 
 ## Step 6 — VPC, connector, Cloud NAT (fixed egress IP)
 
@@ -112,8 +122,7 @@ On the Postgres VM / VPC (DB project), allow **ingress** from the NAT IP only:
 Pipeline: build image → push → deploy Cloud Run `rec-o-api` with:
 
 - `--vpc-connector=rec-o-connector` and `--vpc-egress=all-traffic` (keep NAT on every deploy)
-- `--set-secrets` for all secrets in Step 5
-- `--set-env-vars` for `MODEL_BUCKET_NAME` / `MODEL_BLOB_NAME`
+- `--set-secrets` for all secrets in Step 5 (including `MODEL_BUCKET_NAME` and `MODEL_BLOB_NAME`)
 - `options.logging: CLOUD_LOGGING_ONLY`
 
 Commit and push to `main`.
