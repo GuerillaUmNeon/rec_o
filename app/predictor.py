@@ -205,7 +205,9 @@ def _recommend_artist_ids_from_artifact(
     found_ids = {int(artist_id) for artist_id in matches["artist_id"].tolist()}
     missing_ids = sorted(seed_ids - found_ids)
     if missing_ids:
-        raise RuntimeError(f"Unknown artist IDs: {missing_ids}")
+        raise RuntimeError(
+            f"Artiste inconnu dans la base de données: {missing_ids}"
+        )
 
     query_vectors = vectorizer.transform(matches["genres"].astype(str))
     if len(matches) == 1:
