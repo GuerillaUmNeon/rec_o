@@ -11,7 +11,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from app.predictor import _recommend_artist_ids_from_artifact
+from app.artist.recommender import _recommend_artist_ids_from_artifact
 
 
 DEFAULT_METRICS_PATH = Path("ml/artist_model_metrics.csv")
@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect artist model metrics.")
     parser.add_argument(
         "--model-path",
-        default="models/knn_baseline_model.pkl",
+        default="models/knn_model_test_joris_slim.pkl",
         help="Path to the .pkl/.joblib artifact to measure.",
     )
     parser.add_argument(

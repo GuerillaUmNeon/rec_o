@@ -1,20 +1,18 @@
-"""
-Train TF-IDF + KNN artist recommender (aligned with app/predictor.py).
-"""
+"""Train TF-IDF + KNN artist recommender."""
 
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 
-from ml.features import GENRE_FEATURE_FORMAT, GENRE_TOKEN_PATTERN
+from ml.artist.features import ARTIST_GENRE_FEATURE_FORMAT, ARTIST_GENRE_TOKEN_PATTERN
 
 
-def build_artist_recommender_artifact(
+def build_artist_knn_artifact(
     df: pd.DataFrame,
     n_neighbors: int = 20,
 ) -> dict:
     """
-    Train the artist recommender from genre tokens.
+    Train the artist KNN recommender from genre tokens.
 
     The genres column must contain one whitespace-separated token per
     MusicBrainz genre, for example: "east_coast_hip_hop hip_hop".
@@ -24,12 +22,14 @@ def build_artist_recommender_artifact(
     df_clean = df_clean[df_clean["genres"].str.strip() != ""].copy()
 
     if df_clean.empty:
-        raise ValueError("Cannot train artist recommender without genre data.")
+        raise ValueError("Cannot train artist KNN without genre data.")
+
+    artifact_data = df_clean[["artist_id", "artist_name", "genres"]].copy()
 
     vectorizer = TfidfVectorizer(
         lowercase=False,
         ngram_range=(1, 1),
-        token_pattern=GENRE_TOKEN_PATTERN,
+        token_pattern=ARTIST_GENRE_TOKEN_PATTERN,
     )
     vectors = vectorizer.fit_transform(df_clean["genres"])
 
@@ -41,7 +41,7 @@ def build_artist_recommender_artifact(
     knn_model.fit(vectors)
 
     artist_names = (
-        df_clean[["artist_id", "artist_name"]]
+        artifact_data[["artist_id", "artist_name"]]
         .drop_duplicates("artist_id")
         .set_index("artist_id")["artist_name"]
         .to_dict()
@@ -51,20 +51,22 @@ def build_artist_recommender_artifact(
         "vectorizer": vectorizer,
         "model": knn_model,
         "artist_names": artist_names,
-        "data": df_clean,
-        "genre_feature_format": GENRE_FEATURE_FORMAT,
+        "data": artifact_data,
+        "genre_feature_format": ARTIST_GENRE_FEATURE_FORMAT,
     }
 
 
-def train_artist_recommender(
+def train_artist_knn_from_db(
     conn,
     n_neighbors: int = 20,
     min_tag_count: int = 1,
 ) -> dict:
-    from ml.data import fetch_artist_recommender_training_data
+    from ml.artist.data import fetch_artist_knn_training_data
 
-    df = fetch_artist_recommender_training_data(
-        conn,
-        min_tag_count=min_tag_count,
-    )
-    return build_artist_recommender_artifact(df, n_neighbors=n_neighbors)
+    df = fetch_artist_knn_training_data(conn, min_tag_count=min_tag_count)
+    return build_artist_knn_artifact(df, n_neighbors=n_neighbors)
+
+
+# Backward-compatible aliases
+build_artist_recommender_artifact = build_artist_knn_artifact
+train_artist_recommender = train_artist_knn_from_db

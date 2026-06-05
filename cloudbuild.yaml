@@ -29,8 +29,6 @@ steps:
       - --port=8000
       - --vpc-connector=rec-o-connector
       - --vpc-egress=all-traffic
-      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest
-      - --set-env-vars=MODEL_BUCKET_NAME=$_MODEL_BUCKET_NAME,MODEL_BLOB_NAME=models/knn_baseline_model.pkl
-
-substitutions:
-  _MODEL_BUCKET_NAME: rec-o-models
+      # One-time migration: Cloud Run cannot switch a var from literal env → secret in one step.
+      - --remove-env-vars=TOKEN_API_KEY,POSTGRES,DATABASE,DB_USERNAME,DB_PASSWORD,DB_PORT,DATABASE_URL,MODEL_BUCKET_NAME,ARTIST_MODEL_BLOB_NAME,RELEASE_GROUP_MODEL_BLOB_NAME
+      - --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest,MODEL_BUCKET_NAME=MODEL_BUCKET_NAME:latest,ARTIST_MODEL_BLOB_NAME=ARTIST_MODEL_BLOB_NAME:latest,RELEASE_GROUP_MODEL_BLOB_NAME=RELEASE_GROUP_MODEL_BLOB_NAME:latest

@@ -16,7 +16,7 @@ Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Storage, **Comp
 Create Docker repo `rec-o` in `europe-west1`.
 
 ## Step 4 — Cloud Storage
-Create bucket `rec-o-models` in `europe-west1` and upload the final notebook artifact to `models/knn_baseline_model.pkl`.
+Create bucket `rec-o-models` in `europe-west1` and upload the final notebook artifact to `models/knn_model_test_joris_slim.pkl`.
 
 The artifact must contain:
 ```python
@@ -33,19 +33,30 @@ Give the Cloud Run runtime service account `Storage Object Viewer` on the bucket
 ## Step 5 — Secret Manager
 Create one secret per env var (secret **name** = variable name, value = same as local `.env`):
 
-| Secret | Used for |
-|--------|----------|
-| `TOKEN_API_KEY` | API auth |
-| `POSTGRES` | DB host |
-| `DATABASE` | DB name |
-| `DB_USERNAME` | DB user |
-| `DB_PASSWORD` | DB password |
-| `DB_PORT` | DB port (e.g. `5432`) |
-| `DATABASE_URL` | Full URL; if set at runtime, overrides the vars above |
+| Secret | Used for | Example value |
+|--------|----------|---------------|
+| `TOKEN_API_KEY` | API auth | (generated token) |
+| `POSTGRES` | DB host | VM IP |
+| `DATABASE` | DB name | `musicbrainz` |
+| `DB_USERNAME` | DB user | `rec_o` |
+| `DB_PASSWORD` | DB password | (password) |
+| `DB_PORT` | DB port | `5432` |
+| `DATABASE_URL` | Full URL; if set at runtime, overrides the vars above | `postgresql://...` |
+| `MODEL_BUCKET_NAME` | GCS bucket for the recommender artifact | `rec-o-models` |
+| `ARTIST_MODEL_BLOB_NAME` | Artist KNN GCS object path (change to switch model without rebuilding the image) | `models/knn_model_test_joris_slim.pkl` |
+| `RELEASE_GROUP_MODEL_BLOB_NAME` | Release group / album KNN GCS object path | `models/release_group_knn_model.pkl` |
 
 `DATABASE_URL` must be a valid `postgresql://user:pass@host:5432/db` string (no placeholder `ip` in the host).
 
 Secrets are mounted at **Cloud Run runtime** via `cloudbuild.yaml` — not baked into the Docker image.
+
+`MODEL_*` values are configuration (not credentials), but Secret Manager lets you change the active model path without editing `cloudbuild.yaml` or rebuilding the Docker image.
+
+**Switch model in production:**
+
+1. Upload the new `.pkl` to GCS (`python -m ml.artist.scripts.upload_artist` or `python -m ml.release_group.scripts.upload_release_group`).
+2. Update the matching secret in Secret Manager (`ARTIST_MODEL_BLOB_NAME` or `RELEASE_GROUP_MODEL_BLOB_NAME`, e.g. `models/knn_model_test_joris_slim_v2.pkl`).
+3. Deploy a new Cloud Run revision (re-run the Cloud Build trigger, or **Edit & deploy new revision** in the console — no image rebuild required).
 
 ## Step 6 — VPC, connector, Cloud NAT (fixed egress IP)
 
@@ -112,9 +123,19 @@ On the Postgres VM / VPC (DB project), allow **ingress** from the NAT IP only:
 Pipeline: build image → push → deploy Cloud Run `rec-o-api` with:
 
 - `--vpc-connector=rec-o-connector` and `--vpc-egress=all-traffic` (keep NAT on every deploy)
-- `--set-secrets` for all secrets in Step 5
-- `--set-env-vars` for `MODEL_BUCKET_NAME` / `MODEL_BLOB_NAME`
+- `--remove-env-vars` then `--set-secrets` for all secrets in Step 5 (including `MODEL_BUCKET_NAME`, `ARTIST_MODEL_BLOB_NAME`, and `RELEASE_GROUP_MODEL_BLOB_NAME`)
 - `options.logging: CLOUD_LOGGING_ONLY`
+
+**Deploy error** `Cannot update environment variable [MODEL_BUCKET_NAME] to the given type`:
+
+Cloud Run cannot switch a variable from a **literal env var** to a **Secret Manager reference** in one step. `cloudbuild.yaml` uses `--remove-env-vars` before `--set-secrets` to clear old literals. If the error persists, run once manually:
+
+```bash
+gcloud run services update rec-o-api --region=europe-west1 \
+  --remove-env-vars=MODEL_BUCKET_NAME,ARTIST_MODEL_BLOB_NAME
+```
+
+Then redeploy. Also ensure `RELEASE_GROUP_MODEL_BLOB_NAME` exists in Secret Manager before deploy.
 
 Commit and push to `main`.
 
