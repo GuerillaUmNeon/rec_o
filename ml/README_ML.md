@@ -42,6 +42,7 @@ Each subpackage uses `train_local` + `upload_*` separately (no single pipeline s
 - For upload only:
   - `MODEL_BUCKET_NAME=rec-o-models`
   - `ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model.pkl`
+  - `RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model.pkl`
   - `gcloud auth application-default login` on project **rec-o-gcp**
   - IAM: **Storage Object Creator** on bucket `rec-o-models`
 
@@ -64,10 +65,12 @@ ARTIST_MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
 | `MODEL_BUCKET_NAME` | API + ML upload (all models) | `rec-o-models` |
 | `ARTIST_MODEL_BLOB_NAME` | API download + `upload_artist` | `models/knn_baseline_model.pkl` |
 | `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
+| `RELEASE_GROUP_MODEL_BLOB_NAME` | API download + `upload_release_group` | `models/release_group_knn_model.pkl` |
+| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `release_group_knn_model.pkl` |
 
-Cloud Run prod reads `ARTIST_MODEL_BLOB_NAME` from Secret Manager — your local `.env` test values do not change prod until you upload to the prod blob path and update the secret.
+Cloud Run prod reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — your local `.env` test values do not change prod until you upload to the prod blob path and update the secret.
 
-**Run the API with the test model:** after `train_local`, upload with `upload_artist` or set `MODEL_LOCAL_PATH` — see [app/README_APP.md](../app/README_APP.md).
+**Run the API with test models:** after `train_local`, upload with `upload_*` or set `ARTIST_MODEL_LOCAL_PATH` / `RELEASE_GROUP_MODEL_LOCAL_PATH` — see [app/README_APP.md](../app/README_APP.md).
 
 ## 1. Train and save locally
 
@@ -188,7 +191,7 @@ python -m ml.artist.scripts.upload_artist
 
 Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/knn_baseline_model_test.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
 
-Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
+Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
 
 ---
 
@@ -279,7 +282,7 @@ Used only in `ml/artist/data.py`:
 }
 ```
 
-Same structure expected by `app/predictor.py` at inference.
+Same structure expected by `app/artist/recommender.py` at inference.
 
 ## Reference notebook
 

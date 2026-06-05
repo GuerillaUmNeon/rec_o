@@ -54,16 +54,21 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ## Quick start
 
-**Train and publish a model** (offline):
+**Train and publish models** (offline):
 
 ```bash
+# Artist KNN
 python -m ml.artist.scripts.train_local
 python -m ml.artist.scripts.upload_artist
+
+# Release group / album KNN (fast dev)
+python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
+python -m ml.release_group.scripts.upload_release_group
 ```
 
 Details: [ml/README_ML.md](ml/README_ML.md).
 
-**Run the API** (loads model at startup from GCS or `MODEL_LOCAL_PATH`):
+**Run the API** (loads artist + release_group at startup from GCS or `*_MODEL_LOCAL_PATH`):
 
 ```bash
 uvicorn app.main:app --reload
@@ -92,4 +97,4 @@ APIs enabled for the project:
 
 Production: create matching secrets in Secret Manager (`TOKEN_API_KEY`, `POSTGRES`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_PORT`, `DATABASE_URL`); `cloudbuild.yaml` mounts them on Cloud Run at deploy time. Do not commit `.env`.
 
-Prod artist model: Secret Manager `ARTIST_MODEL_BLOB_NAME` (default `models/knn_baseline_model.pkl`). Use test blob names in local `.env` to avoid overwriting prod on GCS.
+Prod model blobs: Secret Manager `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME`. Use test blob names in local `.env` to avoid overwriting prod on GCS.

@@ -18,6 +18,7 @@ from slowapi.util import get_remote_address
 
 from app.database import fetch_all, get_connection
 from app.artist import enrich_artists_from_db, recommend_artist_ids
+from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
 from app.models import get_models_info, load_models
 from app.queries import (
     ALBUM_SEARCH_QUERY,
@@ -53,18 +54,24 @@ async def lifespan(app: FastAPI):
     """Load recommender artifacts at startup (artist first; others later)."""
     try:
         load_models()
-        artist = get_models_info().get("artist", {})
-        if not artist.get("loaded"):
-            logger.warning(
-                "Artist model not loaded at startup — "
-                "set ARTIST_MODEL_LOCAL_PATH or MODEL_BUCKET_NAME + ARTIST_MODEL_BLOB_NAME."
-            )
-        else:
-            logger.info(
-                "Artist model loaded at startup (%s): %s",
-                artist.get("source"),
-                artist.get("path") or artist.get("gcs_uri"),
-            )
+        models_info = get_models_info()
+        for model_name in ("artist", "release_group"):
+            info = models_info.get(model_name, {})
+            if not info.get("loaded"):
+                logger.warning(
+                    "%s model not loaded at startup — check %s_MODEL_LOCAL_PATH "
+                    "or MODEL_BUCKET_NAME + %s_MODEL_BLOB_NAME.",
+                    model_name.replace("_", " ").title(),
+                    model_name.upper(),
+                    model_name.upper(),
+                )
+            else:
+                logger.info(
+                    "%s model loaded at startup (%s): %s",
+                    model_name.replace("_", " ").title(),
+                    info.get("source"),
+                    info.get("path") or info.get("gcs_uri"),
+                )
     except RuntimeError as exc:
         logger.error("Model loading failed at startup: %s", exc)
     yield
@@ -157,44 +164,48 @@ def predict(
 
 
 @app.post("/predict/album", response_model=AlbumPredictOutput)
+@limiter.limit("10/minute")
 def predict_album(
+    request: Request,
     input: AlbumPredictInput,
     _: str = Depends(verify_api_key),
 ):
     """
-    Temporary mock endpoint for album recommendations.
+    Predict nearest release group IDs from one or more seed album IDs.
 
-    Will be connected to the real recommendation model later.
+    JSON body: release_group_id, response_length, optional genre_id and blacklist.
+    Requires the X-API-Key header.
     """
-
-    mock_albums = [
-        AlbumPredictRow(
-            gid="123e4567-e89b-12d3-a456-426614174000",
-            title="Hybrid Theory",
-            url=["https://example.com/hybrid-theory"],
-            genres=["Nu metal", "Alternative rock"],
-            length=12,
-            tracks=[
-                "Papercut",
-                "One Step Closer",
-                "Crawling"
-            ]
-        ),
-        AlbumPredictRow(
-            gid="123e4567-e89b-12d3-a456-426614174001",
-            title="Meteora",
-            url=["https://example.com/meteora"],
-            genres=["Alternative rock"],
-            length=13,
-            tracks=[
-                "Somewhere I Belong",
-                "Numb",
-                "Faint"
-            ]
+    try:
+        release_group_ids = recommend_release_group_ids(
+            input.release_group_id,
+            input.response_length,
+            blacklist=input.blacklist_release_group_id,
+            genre_ids=input.genre_id,
         )
+
+        with get_connection() as conn:
+            albums_df = enrich_release_groups_from_db(release_group_ids, conn)
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    albums = [
+        AlbumPredictRow(
+            gid=row["gid"],
+            title=row["title"],
+            url=row["url"],
+            genres=row["genres"],
+            length=row["length"],
+            tracks=row["tracks"],
+        )
+        for row in albums_df.to_dict(orient="records")
     ]
 
-    return AlbumPredictOutput(albums=mock_albums)
+    return AlbumPredictOutput(albums=albums)
 
 
 
