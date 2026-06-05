@@ -165,7 +165,7 @@ docker build -t rec-o .
 docker run --name rec-o-api -p 8000:8000 --env-file .env rec-o
 ```
 
-The image contains **only** `app/` + Python deps. No `models/`, no `ml/`, no `.pkl`.  
+The image contains `app/` + a **minimal** `ml/release_group/features.py` stub (so `joblib` can unpickle trained artifacts) + Python deps. No `models/`, no full `ml/` training code, no `.pkl` baked in.  
 With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_NAME` in `--env-file`, the container downloads from GCS at startup (needs valid credentials in the environment or a service account on Cloud Run).
 
 ## Endpoints

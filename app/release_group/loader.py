@@ -1,8 +1,5 @@
 """Load the release group KNN artifact at startup (local file or GCS)."""
 
-import sys
-import types
-
 import joblib
 
 from app.models.loader import build_load_info, resolve_artifact_path
@@ -15,31 +12,6 @@ from app.release_group.config import (
 
 _release_group_model = None
 _release_group_model_load_info: dict = build_load_info(loaded=False)
-
-
-def _register_legacy_ml_shim() -> None:
-    """
-    Artifacts trained before this move pickle ListToSparseTransformer as
-    ml.release_group.features.* — the Docker image only ships app/.
-    """
-    from app.release_group import features as app_features
-
-    if "ml.release_group.features" in sys.modules:
-        return
-
-    ml_pkg = sys.modules.get("ml")
-    if ml_pkg is None:
-        ml_pkg = types.ModuleType("ml")
-        sys.modules["ml"] = ml_pkg
-
-    rg_pkg = sys.modules.get("ml.release_group")
-    if rg_pkg is None:
-        rg_pkg = types.ModuleType("ml.release_group")
-        sys.modules["ml.release_group"] = rg_pkg
-        ml_pkg.release_group = rg_pkg
-
-    sys.modules["ml.release_group.features"] = app_features
-    rg_pkg.features = app_features
 
 
 def get_release_group_model_info() -> dict:
@@ -64,7 +36,6 @@ def load_release_group_model():
         return None
 
     model_path, source = resolved
-    _register_legacy_ml_shim()
     _release_group_model = joblib.load(model_path)
     _release_group_model_load_info = build_load_info(
         loaded=True,
