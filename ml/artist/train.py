@@ -24,6 +24,8 @@ def build_artist_knn_artifact(
     if df_clean.empty:
         raise ValueError("Cannot train artist KNN without genre data.")
 
+    artifact_data = df_clean[["artist_id", "artist_name", "genres"]].copy()
+
     vectorizer = TfidfVectorizer(
         lowercase=False,
         ngram_range=(1, 1),
@@ -39,7 +41,7 @@ def build_artist_knn_artifact(
     knn_model.fit(vectors)
 
     artist_names = (
-        df_clean[["artist_id", "artist_name"]]
+        artifact_data[["artist_id", "artist_name"]]
         .drop_duplicates("artist_id")
         .set_index("artist_id")["artist_name"]
         .to_dict()
@@ -49,15 +51,19 @@ def build_artist_knn_artifact(
         "vectorizer": vectorizer,
         "model": knn_model,
         "artist_names": artist_names,
-        "data": df_clean,
+        "data": artifact_data,
         "genre_feature_format": ARTIST_GENRE_FEATURE_FORMAT,
     }
 
 
-def train_artist_knn_from_db(conn, n_neighbors: int = 20) -> dict:
+def train_artist_knn_from_db(
+    conn,
+    n_neighbors: int = 20,
+    min_tag_count: int = 1,
+) -> dict:
     from ml.artist.data import fetch_artist_knn_training_data
 
-    df = fetch_artist_knn_training_data(conn)
+    df = fetch_artist_knn_training_data(conn, min_tag_count=min_tag_count)
     return build_artist_knn_artifact(df, n_neighbors=n_neighbors)
 
 

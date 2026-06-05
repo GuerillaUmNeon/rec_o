@@ -80,7 +80,7 @@ That `/tmp/...` path is **runtime only** (not in the Docker image; gone when the
 
 ```bash
 MODEL_BUCKET_NAME=rec-o-models
-ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model_test2.pkl
+ARTIST_MODEL_BLOB_NAME=models/knn_model_test_joris_slim.pkl
 RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model_test.pkl
 # no *_MODEL_LOCAL_PATH
 ```
@@ -88,7 +88,7 @@ RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model_test.pkl
 ### Example `.env` — local file only
 
 ```bash
-ARTIST_MODEL_LOCAL_PATH=models/knn_baseline_model_test2.pkl
+ARTIST_MODEL_LOCAL_PATH=models/knn_model_test_joris_slim.pkl
 RELEASE_GROUP_MODEL_LOCAL_PATH=models/release_group_knn_model_test.pkl
 ```
 
@@ -141,9 +141,9 @@ curl http://localhost:8000/model
   "artist": {
     "loaded": true,
     "source": "gcs",
-    "path": "/tmp/knn_baseline_model_test2.pkl",
-    "filename": "knn_baseline_model_test2.pkl",
-    "gcs_uri": "gs://rec-o-models/models/knn_baseline_model_test2.pkl"
+    "path": "/tmp/knn_model_test_joris_slim.pkl",
+    "filename": "knn_model_test_joris_slim.pkl",
+    "gcs_uri": "gs://rec-o-models/models/knn_model_test_joris_slim.pkl"
   },
   "release_group": {
     "loaded": true,

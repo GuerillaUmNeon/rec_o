@@ -5,6 +5,7 @@ from uuid import UUID
 class PlaylistInput(BaseModel):
     ArtistIds: list[int] = Field(..., min_length=1)
     TopN: int = Field(default=5, ge=1, le=50)
+    BlacklistArtistIds: list[int] = Field(default_factory=list)
 
 
 class ArtistUrl(BaseModel):

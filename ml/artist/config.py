@@ -23,7 +23,7 @@ def _env(primary: str, fallback: str | None = None, default: str | None = None) 
 ARTIST_MODEL_LOCAL_FILENAME = _env(
     "ARTIST_MODEL_LOCAL_FILENAME",
     "MODEL_LOCAL_FILENAME",
-    "knn_baseline_model.pkl",
+    "knn_model_test_joris_slim.pkl",
 )
 ARTIST_CANONICAL_MODEL_PATH = MODEL_DIR / ARTIST_MODEL_LOCAL_FILENAME
 
@@ -32,7 +32,7 @@ MODEL_BUCKET_NAME = os.getenv("MODEL_BUCKET_NAME")
 ARTIST_MODEL_BLOB_NAME = _env(
     "ARTIST_MODEL_BLOB_NAME",
     "MODEL_BLOB_NAME",
-    "models/knn_baseline_model.pkl",
+    "models/knn_model_test_joris_slim.pkl",
 )
 
 # Optional cap for faster local artist training (see train_local --limit)

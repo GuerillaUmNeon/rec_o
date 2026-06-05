@@ -4,7 +4,7 @@ Upload the local artist KNN model to GCS (manual step after train_local).
 
 Run from project root:
   python -m ml.artist.scripts.upload_artist
-  python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_baseline_model.pkl
+  python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_model_test_joris_slim.pkl
 
 Requires MODEL_BUCKET_NAME and ARTIST_MODEL_BLOB_NAME in .env (legacy MODEL_BLOB_NAME still works)
 and valid GCP credentials (gcloud auth application-default login on project rec-o-gcp).

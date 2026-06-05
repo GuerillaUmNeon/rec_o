@@ -143,11 +143,15 @@ def predict(
     """
     Predict nearest artist IDs from one or more input artist IDs.
 
-    JSON body: ArtistIds, TopN (see PlaylistInput).
+    JSON body: ArtistIds, TopN, optional BlacklistArtistIds (see PlaylistInput).
     Requires the X-API-Key header.
     """
     try:
-        artist_ids = recommend_artist_ids(input.ArtistIds, input.TopN)
+        artist_ids = recommend_artist_ids(
+            input.ArtistIds,
+            input.TopN,
+            blacklist_artist_ids=input.BlacklistArtistIds,
+        )
 
         with get_connection() as conn:
             artist_df = enrich_artists_from_db(artist_ids, conn)
