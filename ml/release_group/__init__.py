@@ -1,12 +1,11 @@
-"""
-Release group (album) KNN offline training — not implemented yet.
+"""Offline release group KNN training pipeline."""
 
-Planned layout (mirror ml/artist/):
-  config.py, data.py, features.py, train.py, artifact.py, gcs_upload.py
-  scripts/train_local.py, scripts/upload_release_group.py
+from ml.release_group.train import (
+    build_release_group_knn_artifact,
+    recommend_release_group_ids_from_artifact,
+)
 
-Planned .env vars:
-  RELEASE_GROUP_MODEL_LOCAL_FILENAME
-  RELEASE_GROUP_MODEL_BLOB_NAME
-  RELEASE_GROUP_ML_MAX_* (optional training caps)
-"""
+__all__ = [
+    "build_release_group_knn_artifact",
+    "recommend_release_group_ids_from_artifact",
+]

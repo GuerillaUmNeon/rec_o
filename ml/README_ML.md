@@ -1,8 +1,10 @@
 # ML pipeline (offline)
 
-Train the **artist KNN** recommender locally, then upload to GCS manually when ready.
+Train KNN recommenders **locally**, then upload to GCS manually when ready.
 
-Offline training lives under `ml/artist/`. The API in [`app/`](../app/README_APP.md) only loads a trained artifact and serves HTTP routes. Future models (`release_group`, `genre`) will get their own subpackages.
+Offline training lives under `ml/artist/` and `ml/release_group/`. The API in [`app/`](../app/README_APP.md) loads trained artifacts at runtime. `ml/genre/` is planned next.
+
+Reference notebook: `models/note_book_guillaume.ipynb` (release group).
 
 ## Layout
 
@@ -18,17 +20,21 @@ ml/
     scripts/
       train_local.py             # train + save local
       upload_artist.py           # upload .pkl to GCS
-  release_group/                 # album KNN training (stub — mirror artist/)
-  genre/                         # genre KNN training (stub — mirror artist/)
-  scripts/
-    run_local.py                 # deprecated wrapper → artist.scripts.train_local
-    upload_to_gcs.py             # deprecated wrapper → artist.scripts.upload_artist
+  release_group/                 # album KNN training (implemented)
+    config.py                    # RELEASE_GROUP_MODEL_*
+    data.py                      # fetch_release_group_knn_training_data + SQL
+    features.py                  # ListToSparseTransformer
+    train.py                     # build_release_group_knn_artifact
+    artifact.py                  # save_release_group_knn_artifact
+    gcs_upload.py                # upload_release_group_knn_model_to_gcs
+    scripts/
+      train_local.py
+      upload_release_group.py
+  genre/                         # genre KNN training (stub)
   outputs/                       # training caches + model copies (gitignored)
 ```
 
-When `release_group` and `genre` are added, each subpackage gets the same shape as `artist/` and matching `.env` keys (`RELEASE_GROUP_MODEL_BLOB_NAME`, `GENRE_MODEL_BLOB_NAME`, …). The shared bucket stays `MODEL_BUCKET_NAME`.
-
-Use `train_local` and `upload_artist` separately (no single pipeline script).
+Each subpackage uses `train_local` + `upload_*` separately (no single pipeline script). The shared bucket is `MODEL_BUCKET_NAME`.
 
 ## Prerequisites
 
@@ -184,7 +190,65 @@ Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/
 
 Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
 
-## Why training is slow (full run, no `--limit`)
+---
+
+## Release group KNN (`ml/release_group/`)
+
+Port of `models/note_book_guillaume.ipynb` — sparse features (tags, genres, types) + sklearn `Pipeline` + KNN.
+
+### Train locally
+
+**Full DB** (slow — millions of release groups):
+
+```bash
+python -m ml.release_group.scripts.train_local
+```
+
+**Fast dev (recommended):**
+
+```bash
+python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
+```
+
+| Flag | Effect |
+|------|--------|
+| `--limit N` | Cap release groups in main SQL |
+| `--skip-type-inference` | Skip track-meta SQL for missing `type` |
+| `--use-cache` | Load `ml/outputs/release_group_training_features.pkl` |
+| `--refresh-cache` | Re-fetch SQL even with `--use-cache` |
+| `--n-neighbors N` | KNN neighbors (default `10`) |
+
+### Upload to GCS
+
+```bash
+python -m ml.release_group.scripts.upload_release_group
+```
+
+### `.env` (release group)
+
+| Variable | Role |
+|----------|------|
+| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | Local `.pkl` after `train_local` |
+| `RELEASE_GROUP_MODEL_BLOB_NAME` | GCS object path |
+| `RELEASE_GROUP_ML_MAX_ROWS` | Default `--limit` when flag omitted in scoped runs |
+| `RELEASE_GROUP_ML_TRACK_META_CHUNK_SIZE` | Batch size for type-inference SQL |
+
+### Artifact format
+
+```python
+{
+    "model_kind": "release_group_knn",
+    "pipeline": sklearn Pipeline(preprocess + knn),
+    "data_model": pd.DataFrame,
+    "id_to_idx": dict[int, int],
+    "n_neighbors": 10,
+    ...
+}
+```
+
+---
+
+## Why artist training is slow (full run, no `--limit`)
 
 `fetch_artist_knn_training_data_scoped` runs **2 SQL queries** on the full MusicBrainz DB:
 
@@ -197,7 +261,7 @@ Then pandas `groupby`, sklearn fit, `joblib` save. Remote DB adds latency.
 
 ### Optimized genre SQL (when `--limit` is set)
 
-Used only in `ml/data.py` (not in `app/predictor.py`):
+Used only in `ml/artist/data.py`:
 
 - `unnest(%s::int[])` instead of thousands of `VALUES` rows
 - Skips artist-level tags in query 2 (already in query 1)

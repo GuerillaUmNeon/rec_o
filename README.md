@@ -7,7 +7,7 @@ FastAPI service for music recommendations and MusicBrainz search (PostgreSQL).
 ```
 app/          # HTTP API — inference only (see app/README_APP.md)
 ml/           # Offline training + GCS upload (see ml/README_ML.md)
-models/       # Local .pkl artifacts after run_local (not in Docker image)
+models/       # Local .pkl artifacts after train_local (not in Docker image)
 ```
 
 | Doc | Contents |
