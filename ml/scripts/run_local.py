@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Re-fetch SQL even when --use-cache is set.",
     )
+    parser.add_argument(
+        "--min-tag-count",
+        type=int,
+        default=1,
+        help="Minimum MusicBrainz tag count kept in training SQL.",
+    )
     return parser.parse_args()
 
 
@@ -53,12 +59,14 @@ def main() -> None:
                 skip_extended_genres=args.skip_extended_genres,
                 use_cache=args.use_cache,
                 refresh_cache=args.refresh_cache,
+                min_tag_count=args.min_tag_count,
             )
         else:
             raw_df = fetch_artist_recommender_training_data(
                 conn,
                 use_cache=args.use_cache,
                 refresh_cache=args.refresh_cache,
+                min_tag_count=args.min_tag_count,
             )
 
     if raw_df.empty:

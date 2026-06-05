@@ -180,7 +180,7 @@ Same section in the root [README.md](../README.md#upload-to-gcs---env-vs-gcp-cre
 | # | Query | Role | Approx. size |
 |---|--------|------|----------------|
 | 1 | `artist_query` | Artist metadata + tags | **~3.3M rows** |
-| 2 | Extended genres CTE | Release / recording / work tags | Very large (10+ min) |
+| 2 | Extended genres CTE | Release / recording tags | Very large (10+ min) |
 
 Then pandas `groupby`, sklearn fit, `joblib` save. Remote DB adds latency.
 

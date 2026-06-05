@@ -64,6 +64,7 @@ def predict_artist(artist_ids, conn):
         FROM artist
         LEFT JOIN artist_tag
             ON artist_tag.artist = artist.id
+           AND artist_tag.count >= 1
         LEFT JOIN tag
             ON artist_tag.tag = tag.id
         LEFT JOIN genre
@@ -77,7 +78,6 @@ def predict_artist(artist_ids, conn):
         LEFT JOIN link_type
             ON link_type.id = link.link_type
         WHERE artist.id IN ({placeholders})
-          AND artist_tag.count > 0
     """
 
     result = pd.read_sql_query(query, conn, params=artist_ids)

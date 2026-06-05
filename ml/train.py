@@ -56,8 +56,15 @@ def build_artist_recommender_artifact(
     }
 
 
-def train_artist_recommender(conn, n_neighbors: int = 20) -> dict:
+def train_artist_recommender(
+    conn,
+    n_neighbors: int = 20,
+    min_tag_count: int = 1,
+) -> dict:
     from ml.data import fetch_artist_recommender_training_data
 
-    df = fetch_artist_recommender_training_data(conn)
+    df = fetch_artist_recommender_training_data(
+        conn,
+        min_tag_count=min_tag_count,
+    )
     return build_artist_recommender_artifact(df, n_neighbors=n_neighbors)

@@ -10,13 +10,41 @@ import time
 import pandas as pd
 
 from ml.config import ML_GENRE_CHUNK_SIZE, ML_MAX_ARTISTS, TRAINING_FEATURES_CACHE
-from ml.features import join_genre_feature_tokens, ordered_unique
+from ml.features import genre_feature_token, join_genre_feature_tokens, ordered_unique
 
 def _sql_values_placeholders(values: list[int]) -> str:
     return ",".join(["(%s)"] * len(values))
 
 
-def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
+def _validate_min_tag_count(min_tag_count: int) -> int:
+    min_tag_count = int(min_tag_count)
+    if min_tag_count < 1:
+        raise ValueError("min_tag_count must be >= 1")
+    return min_tag_count
+
+
+def _training_features_cache_path(min_tag_count: int):
+    if min_tag_count == 1:
+        return TRAINING_FEATURES_CACHE
+    return TRAINING_FEATURES_CACHE.with_name(
+        f"{TRAINING_FEATURES_CACHE.stem}_min_count_{min_tag_count}"
+        f"{TRAINING_FEATURES_CACHE.suffix}"
+    )
+
+
+def _weighted_training_features_cache_path(min_tag_count: int):
+    return TRAINING_FEATURES_CACHE.with_name(
+        f"{TRAINING_FEATURES_CACHE.stem}_weighted_min_count_{min_tag_count}"
+        f"{TRAINING_FEATURES_CACHE.suffix}"
+    )
+
+
+def _artist_genres_query(
+    selected_artists: list[int] | None = None,
+    *,
+    min_tag_count: int = 1,
+) -> str:
+    min_tag_count = _validate_min_tag_count(min_tag_count)
     has_artist_scope = selected_artists is not None
     selected_artists_cte = ""
     artist_credit_scope = ""
@@ -25,7 +53,6 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
     l_artist_release_group_scope = ""
     l_artist_release_scope = ""
     l_artist_recording_scope = ""
-    l_artist_work_scope = ""
 
     if has_artist_scope:
         values = _sql_values_placeholders(selected_artists)
@@ -51,9 +78,6 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
         )
         l_artist_recording_scope = (
             "JOIN selected_artists ON selected_artists.id = l_artist_recording.entity0"
-        )
-        l_artist_work_scope = (
-            "JOIN selected_artists ON selected_artists.id = l_artist_work.entity0"
         )
 
     return f"""
@@ -139,13 +163,6 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
             FROM l_artist_recording
             {l_artist_recording_scope}
         ),
-        credited_works AS (
-            SELECT
-                l_artist_work.entity0 AS id,
-                l_artist_work.entity1 AS work_id
-            FROM l_artist_work
-            {l_artist_work_scope}
-        ),
         primary_artist_genres AS (
             SELECT
                 artist_tag.artist AS id,
@@ -156,7 +173,7 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
                 ON tag.id = artist_tag.tag
             JOIN genre
                 ON LOWER(genre.name) = LOWER(tag.name)
-            WHERE artist_tag.count > 0
+            WHERE artist_tag.count >= {min_tag_count}
 
             UNION
 
@@ -176,7 +193,7 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
             FROM credited_release_groups
             JOIN release_group_tag
                 ON release_group_tag.release_group = credited_release_groups.release_group_id
-               AND release_group_tag.count > 0
+               AND release_group_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = release_group_tag.tag
             JOIN genre
@@ -190,7 +207,7 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
             FROM credited_releases
             JOIN release_tag
                 ON release_tag.release = credited_releases.release_id
-               AND release_tag.count > 0
+               AND release_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = release_tag.tag
             JOIN genre
@@ -203,23 +220,9 @@ def _artist_genres_query(selected_artists: list[int] | None = None) -> str:
             FROM credited_recordings
             JOIN recording_tag
                 ON recording_tag.recording = credited_recordings.recording_id
-               AND recording_tag.count > 0
+               AND recording_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = recording_tag.tag
-            JOIN genre
-                ON LOWER(genre.name) = LOWER(tag.name)
-
-            UNION
-
-            SELECT
-                credited_works.id AS id,
-                genre.name AS genre
-            FROM credited_works
-            JOIN work_tag
-                ON work_tag.work = credited_works.work_id
-               AND work_tag.count > 0
-            JOIN tag
-                ON tag.id = work_tag.tag
             JOIN genre
                 ON LOWER(genre.name) = LOWER(tag.name)
         )
@@ -322,17 +325,10 @@ _SCOPED_ARTIST_JOINS = """
             FROM l_artist_recording
             JOIN selected_artists ON selected_artists.id = l_artist_recording.entity0
         ),
-        credited_works AS (
-            SELECT
-                l_artist_work.entity0 AS id,
-                l_artist_work.entity1 AS work_id
-            FROM l_artist_work
-            JOIN selected_artists ON selected_artists.id = l_artist_work.entity0
-        ),
 """
 
 
-def _artist_genres_query_training() -> str:
+def _artist_genres_query_training(min_tag_count: int = 1) -> str:
     """
     Lighter genre query for ML training when artist IDs are already scoped.
 
@@ -340,9 +336,10 @@ def _artist_genres_query_training() -> str:
     - skips artist_tag / l_artist_genre (already loaded in artist_query)
     - UNION ALL + DISTINCT instead of correlated NOT EXISTS
     """
+    min_tag_count = _validate_min_tag_count(min_tag_count)
     return (
         _SCOPED_ARTIST_JOINS
-        + """
+        + f"""
         release_genres AS (
             SELECT
                 credited_release_groups.id AS id,
@@ -350,7 +347,7 @@ def _artist_genres_query_training() -> str:
             FROM credited_release_groups
             JOIN release_group_tag
                 ON release_group_tag.release_group = credited_release_groups.release_group_id
-               AND release_group_tag.count > 0
+               AND release_group_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = release_group_tag.tag
             JOIN genre
@@ -364,36 +361,22 @@ def _artist_genres_query_training() -> str:
             FROM credited_releases
             JOIN release_tag
                 ON release_tag.release = credited_releases.release_id
-               AND release_tag.count > 0
+               AND release_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = release_tag.tag
             JOIN genre
                 ON LOWER(genre.name) = LOWER(tag.name)
         ),
-        recording_work_genres AS (
+        recording_genres AS (
             SELECT
                 credited_recordings.id AS id,
                 genre.name AS genre
             FROM credited_recordings
             JOIN recording_tag
                 ON recording_tag.recording = credited_recordings.recording_id
-               AND recording_tag.count > 0
+               AND recording_tag.count >= {min_tag_count}
             JOIN tag
                 ON tag.id = recording_tag.tag
-            JOIN genre
-                ON LOWER(genre.name) = LOWER(tag.name)
-
-            UNION ALL
-
-            SELECT
-                credited_works.id AS id,
-                genre.name AS genre
-            FROM credited_works
-            JOIN work_tag
-                ON work_tag.work = credited_works.work_id
-               AND work_tag.count > 0
-            JOIN tag
-                ON tag.id = work_tag.tag
             JOIN genre
                 ON LOWER(genre.name) = LOWER(tag.name)
         )
@@ -401,7 +384,7 @@ def _artist_genres_query_training() -> str:
         FROM (
             SELECT id, genre FROM release_genres
             UNION ALL
-            SELECT id, genre FROM recording_work_genres
+            SELECT id, genre FROM recording_genres
         ) all_genres
     """
     )
@@ -412,12 +395,13 @@ def _fetch_extended_artist_genres(
     artist_ids: list[int],
     *,
     chunk_size: int | None = None,
+    min_tag_count: int = 1,
 ) -> pd.DataFrame:
     if not artist_ids:
         return pd.DataFrame(columns=["id", "genre"])
 
     chunk_size = chunk_size or ML_GENRE_CHUNK_SIZE
-    query = _artist_genres_query_training()
+    query = _artist_genres_query_training(min_tag_count=min_tag_count)
     chunks: list[pd.DataFrame] = []
     total = len(artist_ids)
     n_batches = (total + chunk_size - 1) // chunk_size
@@ -477,6 +461,7 @@ def fetch_artist_training_data(
     skip_extended_genres: bool = False,
     use_cache: bool = False,
     refresh_cache: bool = False,
+    min_tag_count: int = 1,
 ) -> pd.DataFrame:
     """
     Build artist features for KNN training without dropping artists that lack tags.
@@ -487,11 +472,13 @@ def fetch_artist_training_data(
 
     Use max_artists or ML_MAX_ARTISTS to avoid scanning the full MusicBrainz DB.
     """
+    min_tag_count = _validate_min_tag_count(min_tag_count)
+    training_features_cache = _training_features_cache_path(min_tag_count)
     max_artists = _resolve_max_artists(max_artists)
 
-    if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
-        print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")
-        return pd.read_pickle(TRAINING_FEATURES_CACHE)
+    if use_cache and not refresh_cache and training_features_cache.is_file():
+        print(f"Loading cached training data from {training_features_cache}")
+        return pd.read_pickle(training_features_cache)
 
     scope_sql, scope_params = _artist_scope_sql(max_artists)
     artist_query = f"""
@@ -511,7 +498,7 @@ def fetch_artist_training_data(
             ON area.id = artist.area
         LEFT JOIN artist_tag
             ON artist_tag.artist = artist.id
-           AND artist_tag.count > 0
+           AND artist_tag.count >= {min_tag_count}
         LEFT JOIN tag
             ON tag.id = artist_tag.tag
         LEFT JOIN genre
@@ -542,10 +529,14 @@ def fetch_artist_training_data(
         artist_genres = pd.DataFrame(columns=["id", "genre"])
     elif max_artists:
         artist_ids = artist_rows["artist_id"].drop_duplicates().astype(int).tolist()
-        artist_genres = _fetch_extended_artist_genres(conn, artist_ids)
+        artist_genres = _fetch_extended_artist_genres(
+            conn,
+            artist_ids,
+            min_tag_count=min_tag_count,
+        )
     else:
         print("Fetching extended genres for all artists (slow)...")
-        artist_genres_query = _artist_genres_query()
+        artist_genres_query = _artist_genres_query(min_tag_count=min_tag_count)
         artist_genres = pd.read_sql_query(artist_genres_query, conn)
 
     grouped = (
@@ -581,10 +572,10 @@ def fetch_artist_training_data(
     grouped = grouped.drop(columns=["tag_genres", "all_genres"])
     grouped["tag_count_sum"] = grouped["tag_count_sum"].fillna(0)
 
-    if not (use_cache and TRAINING_FEATURES_CACHE.is_file() and not refresh_cache):
-        TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        grouped.to_pickle(TRAINING_FEATURES_CACHE)
-        print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
+    if not (use_cache and training_features_cache.is_file() and not refresh_cache):
+        training_features_cache.parent.mkdir(parents=True, exist_ok=True)
+        grouped.to_pickle(training_features_cache)
+        print(f"Cached training features to {training_features_cache}")
 
     return grouped
 
@@ -594,15 +585,18 @@ def fetch_artist_recommender_training_data(
     *,
     use_cache: bool = False,
     refresh_cache: bool = False,
+    min_tag_count: int = 1,
 ) -> pd.DataFrame:
     """
     Build genre-only artist features for the KNN recommender (temp tables).
 
     Same pipeline as app/predictor.train_artist_recommender — full DB scan.
     """
-    if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
-        print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")
-        return pd.read_pickle(TRAINING_FEATURES_CACHE)
+    min_tag_count = _validate_min_tag_count(min_tag_count)
+    training_features_cache = _training_features_cache_path(min_tag_count)
+    if use_cache and not refresh_cache and training_features_cache.is_file():
+        print(f"Loading cached training data from {training_features_cache}")
+        return pd.read_pickle(training_features_cache)
 
     setup_steps = [
         """
@@ -681,7 +675,7 @@ def fetch_artist_recommender_training_data(
         """
         DROP TABLE IF EXISTS rec_o_primary_artist_genres;
         """,
-        """
+        f"""
         CREATE TEMP TABLE rec_o_primary_artist_genres ON COMMIT DROP AS
         SELECT artist_tag.artist AS id, genre.name AS genre
         FROM artist_tag
@@ -689,7 +683,7 @@ def fetch_artist_recommender_training_data(
             ON tag.id = artist_tag.tag
         JOIN genre
             ON LOWER(genre.name) = LOWER(tag.name)
-        WHERE artist_tag.count > 0
+        WHERE artist_tag.count >= {min_tag_count}
 
         UNION
 
@@ -704,7 +698,7 @@ def fetch_artist_recommender_training_data(
         FROM rec_o_credited_release_groups
         JOIN release_group_tag
             ON release_group_tag.release_group = rec_o_credited_release_groups.release_group_id
-           AND release_group_tag.count > 0
+           AND release_group_tag.count >= {min_tag_count}
         JOIN tag
             ON tag.id = release_group_tag.tag
         JOIN genre
@@ -716,7 +710,7 @@ def fetch_artist_recommender_training_data(
         FROM rec_o_credited_releases
         JOIN release_tag
             ON release_tag.release = rec_o_credited_releases.release_id
-           AND release_tag.count > 0
+           AND release_tag.count >= {min_tag_count}
         JOIN tag
             ON tag.id = release_tag.tag
         JOIN genre
@@ -784,7 +778,7 @@ def fetch_artist_recommender_training_data(
         """
         DROP TABLE IF EXISTS rec_o_artist_training_genres;
         """,
-        """
+        f"""
         CREATE TEMP TABLE rec_o_artist_training_genres ON COMMIT DROP AS
         SELECT id, genre
         FROM rec_o_primary_artist_genres
@@ -795,7 +789,7 @@ def fetch_artist_recommender_training_data(
         FROM rec_o_credited_recordings
         JOIN recording_tag
             ON recording_tag.recording = rec_o_credited_recordings.recording_id
-           AND recording_tag.count > 0
+           AND recording_tag.count >= {min_tag_count}
         JOIN tag
             ON tag.id = recording_tag.tag
         JOIN genre
@@ -810,7 +804,10 @@ def fetch_artist_recommender_training_data(
         """,
     ]
 
-    print("Building recommender training temp tables (full DB)...")
+    print(
+        "Building recommender training temp tables "
+        f"(full DB, min_tag_count={min_tag_count})..."
+    )
     t0 = time.perf_counter()
     for sql in setup_steps:
         conn.execute(sql)
@@ -861,8 +858,317 @@ def fetch_artist_recommender_training_data(
     grouped["genres"] = grouped.pop("genre_names").apply(join_genre_feature_tokens)
     grouped = grouped[grouped["genres"].str.strip() != ""].copy()
 
-    TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    grouped.to_pickle(TRAINING_FEATURES_CACHE)
-    print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
+    training_features_cache.parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_pickle(training_features_cache)
+    print(f"Cached training features to {training_features_cache}")
+
+    return grouped
+
+
+def fetch_weighted_artist_recommender_training_data(
+    conn,
+    *,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
+    min_tag_count: int = 1,
+) -> pd.DataFrame:
+    """
+    Build weighted genre-token features for the KNN recommender.
+
+    Weighting keeps the same token vocabulary but repeats tokens according to
+    source confidence:
+
+    - artist_tag / l_artist_genre: 4
+    - release_group_tag: 3
+    - release_tag: 2
+    - recording_tag fallback only: 1
+    """
+    min_tag_count = _validate_min_tag_count(min_tag_count)
+    training_features_cache = _weighted_training_features_cache_path(min_tag_count)
+    if use_cache and not refresh_cache and training_features_cache.is_file():
+        print(f"Loading cached weighted training data from {training_features_cache}")
+        return pd.read_pickle(training_features_cache)
+
+    setup_steps = [
+        """
+        DROP TABLE IF EXISTS rec_o_credited_release_groups;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_release_groups ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, release_group.id AS release_group_id
+        FROM artist_credit_name
+        JOIN release_group
+            ON release_group.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT artist_credit_name.artist AS id, release.release_group AS release_group_id
+        FROM artist_credit_name
+        JOIN release
+            ON release.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT l_artist_release_group.entity0 AS id, l_artist_release_group.entity1 AS release_group_id
+        FROM l_artist_release_group
+
+        UNION
+
+        SELECT l_artist_release.entity0 AS id, release.release_group AS release_group_id
+        FROM l_artist_release
+        JOIN release
+            ON release.id = l_artist_release.entity1;
+        """,
+        """
+        CREATE INDEX rec_o_credited_release_groups_id_idx
+            ON rec_o_credited_release_groups(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_release_groups_release_group_idx
+            ON rec_o_credited_release_groups(release_group_id);
+        """,
+        """
+        ANALYZE rec_o_credited_release_groups;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_credited_releases;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_releases ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, release.id AS release_id
+        FROM artist_credit_name
+        JOIN release
+            ON release.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT rec_o_credited_release_groups.id AS id, release.id AS release_id
+        FROM rec_o_credited_release_groups
+        JOIN release
+            ON release.release_group = rec_o_credited_release_groups.release_group_id
+
+        UNION
+
+        SELECT l_artist_release.entity0 AS id, l_artist_release.entity1 AS release_id
+        FROM l_artist_release;
+        """,
+        """
+        CREATE INDEX rec_o_credited_releases_id_idx
+            ON rec_o_credited_releases(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_releases_release_idx
+            ON rec_o_credited_releases(release_id);
+        """,
+        """
+        ANALYZE rec_o_credited_releases;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_weighted_primary_artist_genres;
+        """,
+        f"""
+        CREATE TEMP TABLE rec_o_weighted_primary_artist_genres ON COMMIT DROP AS
+        SELECT id, genre, MAX(source_weight) AS source_weight
+        FROM (
+            SELECT artist_tag.artist AS id, genre.name AS genre, 4 AS source_weight
+            FROM artist_tag
+            JOIN tag
+                ON tag.id = artist_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+            WHERE artist_tag.count >= {min_tag_count}
+
+            UNION ALL
+
+            SELECT l_artist_genre.entity0 AS id, genre.name AS genre, 4 AS source_weight
+            FROM l_artist_genre
+            JOIN genre
+                ON genre.id = l_artist_genre.entity1
+
+            UNION ALL
+
+            SELECT rec_o_credited_release_groups.id AS id, genre.name AS genre, 3 AS source_weight
+            FROM rec_o_credited_release_groups
+            JOIN release_group_tag
+                ON release_group_tag.release_group = rec_o_credited_release_groups.release_group_id
+               AND release_group_tag.count >= {min_tag_count}
+            JOIN tag
+                ON tag.id = release_group_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+
+            UNION ALL
+
+            SELECT rec_o_credited_releases.id AS id, genre.name AS genre, 2 AS source_weight
+            FROM rec_o_credited_releases
+            JOIN release_tag
+                ON release_tag.release = rec_o_credited_releases.release_id
+               AND release_tag.count >= {min_tag_count}
+            JOIN tag
+                ON tag.id = release_tag.tag
+            JOIN genre
+                ON LOWER(genre.name) = LOWER(tag.name)
+        ) weighted_primary
+        GROUP BY id, genre;
+        """,
+        """
+        CREATE INDEX rec_o_weighted_primary_artist_genres_id_idx
+            ON rec_o_weighted_primary_artist_genres(id);
+        """,
+        """
+        ANALYZE rec_o_weighted_primary_artist_genres;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_artists_without_primary_genres;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_artists_without_primary_genres ON COMMIT DROP AS
+        SELECT artist.id
+        FROM artist
+        WHERE artist.name IS NOT NULL
+          AND LOWER(artist.name) != 'various artists'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM rec_o_weighted_primary_artist_genres
+              WHERE rec_o_weighted_primary_artist_genres.id = artist.id
+          );
+        """,
+        """
+        CREATE INDEX rec_o_artists_without_primary_genres_id_idx
+            ON rec_o_artists_without_primary_genres(id);
+        """,
+        """
+        ANALYZE rec_o_artists_without_primary_genres;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_credited_recordings;
+        """,
+        """
+        CREATE TEMP TABLE rec_o_credited_recordings ON COMMIT DROP AS
+        SELECT artist_credit_name.artist AS id, recording.id AS recording_id
+        FROM artist_credit_name
+        JOIN rec_o_artists_without_primary_genres
+            ON rec_o_artists_without_primary_genres.id = artist_credit_name.artist
+        JOIN recording
+            ON recording.artist_credit = artist_credit_name.artist_credit
+
+        UNION
+
+        SELECT l_artist_recording.entity0 AS id, l_artist_recording.entity1 AS recording_id
+        FROM l_artist_recording
+        JOIN rec_o_artists_without_primary_genres
+            ON rec_o_artists_without_primary_genres.id = l_artist_recording.entity0;
+        """,
+        """
+        CREATE INDEX rec_o_credited_recordings_id_idx
+            ON rec_o_credited_recordings(id);
+        """,
+        """
+        CREATE INDEX rec_o_credited_recordings_recording_idx
+            ON rec_o_credited_recordings(recording_id);
+        """,
+        """
+        ANALYZE rec_o_credited_recordings;
+        """,
+        """
+        DROP TABLE IF EXISTS rec_o_weighted_artist_training_genres;
+        """,
+        f"""
+        CREATE TEMP TABLE rec_o_weighted_artist_training_genres ON COMMIT DROP AS
+        SELECT id, genre, source_weight
+        FROM rec_o_weighted_primary_artist_genres
+
+        UNION
+
+        SELECT rec_o_credited_recordings.id AS id, genre.name AS genre, 1 AS source_weight
+        FROM rec_o_credited_recordings
+        JOIN recording_tag
+            ON recording_tag.recording = rec_o_credited_recordings.recording_id
+           AND recording_tag.count >= {min_tag_count}
+        JOIN tag
+            ON tag.id = recording_tag.tag
+        JOIN genre
+            ON LOWER(genre.name) = LOWER(tag.name);
+        """,
+        """
+        CREATE INDEX rec_o_weighted_artist_training_genres_id_idx
+            ON rec_o_weighted_artist_training_genres(id);
+        """,
+        """
+        ANALYZE rec_o_weighted_artist_training_genres;
+        """,
+    ]
+
+    print(
+        "Building weighted recommender training temp tables "
+        f"(full DB, min_tag_count={min_tag_count})..."
+    )
+    t0 = time.perf_counter()
+    for sql in setup_steps:
+        conn.execute(sql)
+
+    query = """
+        SELECT
+            artist.id AS artist_id,
+            artist.gid AS artist_gid,
+            artist.name AS artist_name,
+            artist_type.name AS artist_type,
+            area.name AS area_name,
+            ''::text AS tags,
+            rec_o_weighted_artist_training_genres.genre AS genre,
+            rec_o_weighted_artist_training_genres.source_weight AS source_weight,
+            0::bigint AS tag_count_sum
+        FROM rec_o_weighted_artist_training_genres
+        JOIN artist
+            ON artist.id = rec_o_weighted_artist_training_genres.id
+        LEFT JOIN artist_type
+            ON artist_type.id = artist.type
+        LEFT JOIN area
+            ON area.id = artist.area
+        WHERE artist.name IS NOT NULL
+          AND LOWER(artist.name) != 'various artists'
+    """
+    genre_rows = pd.read_sql_query(query, conn)
+    print(f"Weighted training query done in {time.perf_counter() - t0:.1f}s")
+
+    if genre_rows.empty:
+        return pd.DataFrame(
+            columns=[
+                "artist_id",
+                "artist_gid",
+                "artist_name",
+                "artist_type",
+                "area_name",
+                "tags",
+                "genres",
+                "tag_count_sum",
+            ]
+        )
+
+    genre_rows["genre_token"] = genre_rows["genre"].apply(genre_feature_token)
+    genre_rows = genre_rows[genre_rows["genre_token"].str.strip() != ""].copy()
+    genre_rows["source_weight"] = genre_rows["source_weight"].fillna(1).astype(int)
+    genre_rows["weighted_genre_token"] = genre_rows.apply(
+        lambda row: " ".join([row["genre_token"]] * max(1, int(row["source_weight"]))),
+        axis=1,
+    )
+
+    grouped = (
+        genre_rows.groupby(
+            ["artist_id", "artist_gid", "artist_name", "artist_type", "area_name"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            tags=("tags", "first"),
+            genres=("weighted_genre_token", lambda values: " ".join(values).strip()),
+            tag_count_sum=("tag_count_sum", "first"),
+        )
+    )
+    grouped = grouped[grouped["genres"].str.strip() != ""].copy()
+
+    training_features_cache.parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_pickle(training_features_cache)
+    print(f"Cached weighted training features to {training_features_cache}")
 
     return grouped
