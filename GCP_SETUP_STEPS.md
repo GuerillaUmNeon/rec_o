@@ -123,8 +123,19 @@ On the Postgres VM / VPC (DB project), allow **ingress** from the NAT IP only:
 Pipeline: build image → push → deploy Cloud Run `rec-o-api` with:
 
 - `--vpc-connector=rec-o-connector` and `--vpc-egress=all-traffic` (keep NAT on every deploy)
-- `--set-secrets` for all secrets in Step 5 (including `MODEL_BUCKET_NAME`, `ARTIST_MODEL_BLOB_NAME`, and `RELEASE_GROUP_MODEL_BLOB_NAME`)
+- `--remove-env-vars` then `--set-secrets` for all secrets in Step 5 (including `MODEL_BUCKET_NAME`, `ARTIST_MODEL_BLOB_NAME`, and `RELEASE_GROUP_MODEL_BLOB_NAME`)
 - `options.logging: CLOUD_LOGGING_ONLY`
+
+**Deploy error** `Cannot update environment variable [MODEL_BUCKET_NAME] to the given type`:
+
+Cloud Run cannot switch a variable from a **literal env var** to a **Secret Manager reference** in one step. `cloudbuild.yaml` uses `--remove-env-vars` before `--set-secrets` to clear old literals. If the error persists, run once manually:
+
+```bash
+gcloud run services update rec-o-api --region=europe-west1 \
+  --remove-env-vars=MODEL_BUCKET_NAME,ARTIST_MODEL_BLOB_NAME
+```
+
+Then redeploy. Also ensure `RELEASE_GROUP_MODEL_BLOB_NAME` exists in Secret Manager before deploy.
 
 Commit and push to `main`.
 
