@@ -18,6 +18,7 @@ app/
   release_group/       # Stub (future album KNN)
   genre/               # Stub (future genre KNN)
   predictor.py         # Deprecated re-exports — use app.artist / app.models
+  db_models.py         # DB table/ORM models (not ML — see app/models/)
   database.py          # PostgreSQL connection
   queries.py           # SQL for search endpoints
   schemas.py           # Pydantic models
