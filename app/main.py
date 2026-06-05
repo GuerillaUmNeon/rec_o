@@ -5,7 +5,9 @@ Exposes HTTP routes, API key authentication, rate limiting,
 and MusicBrainz prediction / search endpoints.
 """
 
+import logging
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
@@ -15,7 +17,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.database import fetch_all, get_connection
-from app.predictor import predict_playlist, predict_artist
+from app.artist import enrich_artists_from_db, recommend_artist_ids
+from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
+from app.models import get_models_info, load_models
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
@@ -38,9 +42,39 @@ from app.schemas import (
 # Load variables from .env (TOKEN_API_KEY, POSTGRES, etc.)
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # Expected key in the X-API-Key header for protected routes
 API_KEY = os.getenv("TOKEN_API_KEY")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load recommender artifacts at startup (artist first; others later)."""
+    try:
+        load_models()
+        models_info = get_models_info()
+        for model_name in ("artist", "release_group"):
+            info = models_info.get(model_name, {})
+            if not info.get("loaded"):
+                logger.warning(
+                    "%s model not loaded at startup — check %s_MODEL_LOCAL_PATH "
+                    "or MODEL_BUCKET_NAME + %s_MODEL_BLOB_NAME.",
+                    model_name.replace("_", " ").title(),
+                    model_name.upper(),
+                    model_name.upper(),
+                )
+            else:
+                logger.info(
+                    "%s model loaded at startup (%s): %s",
+                    model_name.replace("_", " ").title(),
+                    info.get("source"),
+                    info.get("path") or info.get("gcs_uri"),
+                )
+    except RuntimeError as exc:
+        logger.error("Model loading failed at startup: %s", exc)
+    yield
 
 
 def get_client_ip(request: Request) -> str:
@@ -60,7 +94,7 @@ def get_client_ip(request: Request) -> str:
 
 # Limit requests per IP (slowapi)
 limiter = Limiter(key_func=get_client_ip)
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -92,6 +126,13 @@ def read_root(request: Request):
     return {"message": "Hello, World!"}
 
 
+@app.get("/model")
+@limiter.limit("60/minute")
+def model_status(request: Request):
+    """Load status per model type (artist, release_group, genre). No API key required."""
+    return get_models_info()
+
+
 @app.post("/predict/artist", response_model=PlaylistOutput)
 @limiter.limit("10/minute")
 def predict(
@@ -106,10 +147,10 @@ def predict(
     Requires the X-API-Key header.
     """
     try:
-        artist_ids = predict_playlist(input.ArtistIds, input.TopN)
+        artist_ids = recommend_artist_ids(input.ArtistIds, input.TopN)
 
         with get_connection() as conn:
-            artist_df = predict_artist(artist_ids, conn)
+            artist_df = enrich_artists_from_db(artist_ids, conn)
 
     except RuntimeError as exc:
         raise HTTPException(
@@ -123,44 +164,48 @@ def predict(
 
 
 @app.post("/predict/album", response_model=AlbumPredictOutput)
+@limiter.limit("10/minute")
 def predict_album(
+    request: Request,
     input: AlbumPredictInput,
     _: str = Depends(verify_api_key),
 ):
     """
-    Temporary mock endpoint for album recommendations.
+    Predict nearest release group IDs from one or more seed album IDs.
 
-    Will be connected to the real recommendation model later.
+    JSON body: release_group_id, response_length, optional genre_id and blacklist.
+    Requires the X-API-Key header.
     """
-
-    mock_albums = [
-        AlbumPredictRow(
-            gid="123e4567-e89b-12d3-a456-426614174000",
-            title="Hybrid Theory",
-            url=["https://example.com/hybrid-theory"],
-            genres=["Nu metal", "Alternative rock"],
-            length=12,
-            tracks=[
-                "Papercut",
-                "One Step Closer",
-                "Crawling"
-            ]
-        ),
-        AlbumPredictRow(
-            gid="123e4567-e89b-12d3-a456-426614174001",
-            title="Meteora",
-            url=["https://example.com/meteora"],
-            genres=["Alternative rock"],
-            length=13,
-            tracks=[
-                "Somewhere I Belong",
-                "Numb",
-                "Faint"
-            ]
+    try:
+        release_group_ids = recommend_release_group_ids(
+            input.release_group_id,
+            input.response_length,
+            blacklist=input.blacklist_release_group_id,
+            genre_ids=input.genre_id,
         )
+
+        with get_connection() as conn:
+            albums_df = enrich_release_groups_from_db(release_group_ids, conn)
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    albums = [
+        AlbumPredictRow(
+            gid=row["gid"],
+            title=row["title"],
+            url=row["url"],
+            genres=row["genres"],
+            length=row["length"],
+            tracks=row["tracks"],
+        )
+        for row in albums_df.to_dict(orient="records")
     ]
 
-    return AlbumPredictOutput(albums=mock_albums)
+    return AlbumPredictOutput(albums=albums)
 
 
 

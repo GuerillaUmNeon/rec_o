@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
 """
-Train KNN and save artifacts locally only (no GCS).
+Train artist KNN and save artifacts locally (no GCS).
 
 Run from project root:
-  python -m ml.scripts.run_local
-  python -m ml.scripts.run_local --limit 5000 --skip-extended-genres --use-cache
+  python -m ml.artist.scripts.train_local
+  python -m ml.artist.scripts.train_local --limit 5000 --skip-extended-genres --use-cache
 """
 
 import argparse
 
 from app.database import get_connection
-from ml.artifact import save_artifact
-from ml.data import fetch_artist_recommender_training_data, fetch_artist_training_data
-from ml.train import build_artist_recommender_artifact
+from ml.artist.artifact import save_artist_knn_artifact
+from ml.artist.data import (
+    fetch_artist_knn_training_data,
+    fetch_artist_knn_training_data_scoped,
+)
+from ml.artist.train import build_artist_knn_artifact
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train KNN and save locally.")
+    parser = argparse.ArgumentParser(description="Train artist KNN and save locally.")
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Max artists to load (faster). Overrides ML_MAX_ARTISTS from .env.",
+        help="Max artists to load (faster). Overrides ARTIST_ML_MAX_ARTISTS / ML_MAX_ARTISTS from .env.",
     )
     parser.add_argument(
         "--skip-extended-genres",
@@ -31,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        help="Reuse ml/outputs/training_features.pkl if present.",
+        help="Reuse ml/outputs/artist_training_features.pkl if present.",
     )
     parser.add_argument(
         "--refresh-cache",
@@ -47,7 +50,7 @@ def main() -> None:
 
     with get_connection() as conn:
         if use_scoped_fetch:
-            raw_df = fetch_artist_training_data(
+            raw_df = fetch_artist_knn_training_data_scoped(
                 conn,
                 max_artists=args.limit,
                 skip_extended_genres=args.skip_extended_genres,
@@ -55,21 +58,21 @@ def main() -> None:
                 refresh_cache=args.refresh_cache,
             )
         else:
-            raw_df = fetch_artist_recommender_training_data(
+            raw_df = fetch_artist_knn_training_data(
                 conn,
                 use_cache=args.use_cache,
                 refresh_cache=args.refresh_cache,
             )
 
     if raw_df.empty:
-        raise SystemExit("No training rows returned from the database.")
+        raise SystemExit("No artist training rows returned from the database.")
 
-    print(f"Training rows: {len(raw_df):,}")
-    artifact = build_artist_recommender_artifact(raw_df)
+    print(f"Artist training rows: {len(raw_df):,}")
+    artifact = build_artist_knn_artifact(raw_df)
     print(f"Artifact rows (with genres): {len(artifact['data']):,}")
 
-    save_artifact(artifact)
-    print("Done. Upload to GCS manually: python -m ml.scripts.upload_to_gcs")
+    save_artist_knn_artifact(artifact)
+    print("Done. Upload to GCS manually: python -m ml.artist.scripts.upload_artist")
 
 
 if __name__ == "__main__":

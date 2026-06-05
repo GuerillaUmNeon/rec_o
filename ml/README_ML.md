@@ -1,63 +1,83 @@
 # ML pipeline (offline)
 
-Train the KNN artist recommender **locally**, then upload to GCS **manually** when ready.
+Train KNN recommenders **locally**, then upload to GCS manually when ready.
 
-This folder is a **copy** of training logic from `app/predictor.py` and `notebooks/note_book_joris.ipynb`. The API in `app/` is unchanged (duplicate code for now).
+Offline training lives under `ml/artist/` and `ml/release_group/`. The API in [`app/`](../app/README_APP.md) loads trained artifacts at runtime. `ml/genre/` is planned next.
+
+Reference notebook: `models/note_book_guillaume.ipynb` (release group).
 
 ## Layout
 
 ```
 ml/
-  config.py            # paths, MODEL_BUCKET_NAME, ML_MAX_ARTISTS, ML_GENRE_CHUNK_SIZE
-  data.py              # fetch_artist_training_data + SQL
-  features.py          # genre tokens (aligned with app/predictor.py)
-  train.py             # build_artist_recommender_artifact (Tfidf + KNN)
-  artifact.py          # local save only (no GCS)
-  gcs_upload.py        # GCS upload helper
-  scripts/
-    run_local.py       # train + save local
-    upload_to_gcs.py   # upload an existing .pkl to GCS
-  outputs/             # training_features.pkl cache + model copies (gitignored)
+  artist/                        # artist KNN training (implemented)
+    config.py                    # ARTIST_MODEL_*, MODEL_BUCKET_NAME
+    data.py                      # fetch_artist_knn_training_data* + SQL
+    features.py                  # artist genre tokens
+    train.py                     # build_artist_knn_artifact (Tfidf + KNN)
+    artifact.py                  # save_artist_knn_artifact (local only)
+    gcs_upload.py                # upload_artist_knn_model_to_gcs
+    scripts/
+      train_local.py             # train + save local
+      upload_artist.py           # upload .pkl to GCS
+  release_group/                 # album KNN training (implemented)
+    config.py                    # RELEASE_GROUP_MODEL_*
+    data.py                      # fetch_release_group_knn_training_data + SQL
+    features.py                  # ListToSparseTransformer
+    train.py                     # build_release_group_knn_artifact
+    artifact.py                  # save_release_group_knn_artifact
+    gcs_upload.py                # upload_release_group_knn_model_to_gcs
+    scripts/
+      train_local.py
+      upload_release_group.py
+  genre/                         # genre KNN training (stub)
+  outputs/                       # training caches + model copies (gitignored)
 ```
 
-There is **no** `run_pipeline.py` — use `run_local` and `upload_to_gcs` separately.
+Each subpackage uses `train_local` + `upload_*` separately (no single pipeline script). The shared bucket is `MODEL_BUCKET_NAME`.
 
 ## Prerequisites
 
 - `.env` with Postgres (`DATABASE_URL` or `POSTGRES`, `DATABASE`, etc.)
 - For upload only:
   - `MODEL_BUCKET_NAME=rec-o-models`
-  - `MODEL_BLOB_NAME=models/knn_baseline_model.pkl`
+  - `ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model.pkl`
+  - `RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model.pkl`
   - `gcloud auth application-default login` on project **rec-o-gcp**
   - IAM: **Storage Object Creator** on bucket `rec-o-models`
 
 Optional in `.env`:
 
 ```bash
-# Faster training
-# ML_MAX_ARTISTS=20000
-# ML_GENRE_CHUNK_SIZE=2000
+# Faster artist training
+# ARTIST_ML_MAX_ARTISTS=20000
+# ARTIST_ML_GENRE_CHUNK_SIZE=2000
 
 # Test artifact names (do not overwrite prod)
-MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
-MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
+ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
+ARTIST_MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
 ```
+
+`MODEL_BUCKET_NAME` is shared across models. Legacy `MODEL_BLOB_NAME`, `MODEL_LOCAL_FILENAME`, `ML_MAX_ARTISTS`, `ML_GENRE_CHUNK_SIZE` still work as fallbacks.
 
 | Variable | Used by | Prod value |
 |----------|---------|------------|
-| `MODEL_LOCAL_FILENAME` | `run_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
-| `MODEL_BLOB_NAME` | `upload_to_gcs` only | `models/knn_baseline_model.pkl` |
+| `MODEL_BUCKET_NAME` | API + ML upload (all models) | `rec-o-models` |
+| `ARTIST_MODEL_BLOB_NAME` | API download + `upload_artist` | `models/knn_baseline_model.pkl` |
+| `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
+| `RELEASE_GROUP_MODEL_BLOB_NAME` | API download + `upload_release_group` | `models/release_group_knn_model.pkl` |
+| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `release_group_knn_model.pkl` |
 
-Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — your local `.env` test values do not change prod until you upload to the prod blob path.
+Cloud Run prod reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — your local `.env` test values do not change prod until you upload to the prod blob path and update the secret.
 
-**Local API with the test model:** put `knn_baseline_model_test.pkl` in `models/` (after `run_local`) and set `MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl` in `.env` for GCS fallback. `app/predictor.py` picks the **newest** `.pkl` in `models/` (or `knn_baseline_model.pkl` at project root). To force the test file, remove/rename other `.pkl` in `models/` or copy the test artifact to `knn_baseline_model.pkl` at the project root.
+**Run the API with test models:** after `train_local`, upload with `upload_*` or set `ARTIST_MODEL_LOCAL_PATH` / `RELEASE_GROUP_MODEL_LOCAL_PATH` — see [app/README_APP.md](../app/README_APP.md).
 
 ## 1. Train and save locally
 
-**Full DB (same as `app/predictor.train_artist_recommender`)** — temp tables + genre tokens:
+**Full DB** — temp tables + genre tokens:
 
 ```bash
-python -m ml.scripts.run_local
+python -m ml.artist.scripts.train_local
 ```
 
 **Fast dev** — scoped SQL (`--limit` / `--skip-extended-genres`), same artifact format:
@@ -65,41 +85,41 @@ python -m ml.scripts.run_local
 **Fast dev (recommended):**
 
 ```bash
-python -m ml.scripts.run_local --limit 5000 --skip-extended-genres --use-cache
+python -m ml.artist.scripts.train_local --limit 5000 --skip-extended-genres --use-cache
 ```
 
 **With extended genres (optimized SQL, batched):**
 
 ```bash
-python -m ml.scripts.run_local --limit 20000 --use-cache --refresh-cache
+python -m ml.artist.scripts.train_local --limit 20000 --use-cache --refresh-cache
 ```
 
-### CLI options (`run_local`)
+### CLI options (`train_local`)
 
 | Flag | Effect |
 |------|--------|
 | `--limit N` | Cap artists; query 2 scoped + batched (see below) |
 | `--skip-extended-genres` | Skip query 2 (tags only — fastest) |
-| `--use-cache` | Load `ml/outputs/training_features.pkl` if present (skip SQL) |
+| `--use-cache` | Load `ml/outputs/artist_training_features.pkl` if present (skip SQL) |
 | `--refresh-cache` | Re-fetch SQL even with `--use-cache` |
 
 ### Output files (local only, no GCS)
 
 | File | What it is |
 |------|------------|
-| `ml/outputs/training_features.pkl` | **SQL cache** — see below |
-| `models/<MODEL_LOCAL_FILENAME>` | **Trained model** (canonical; used by `upload_to_gcs` by default) |
-| `ml/outputs/<MODEL_LOCAL_FILENAME>` | Same artifact (convenience copy) |
+| `ml/outputs/artist_training_features.pkl` | **SQL cache** — see below |
+| `models/<ARTIST_MODEL_LOCAL_FILENAME>` | **Trained model** (canonical; used by `upload_artist` by default) |
+| `ml/outputs/<ARTIST_MODEL_LOCAL_FILENAME>` | Same artifact (convenience copy) |
 | `models/<stem>_<timestamp>.pkl` | Timestamped backup per run |
 
-#### `training_features.pkl` (intermediate cache)
+#### `artist_training_features.pkl` (intermediate cache)
 
-**Not** the final model. It is a pandas DataFrame saved after SQL fetch/aggregation, **before** `build_artist_recommender_artifact`.
+**Not** the final model. It is a pandas DataFrame saved after SQL fetch/aggregation, **before** `build_artist_knn_artifact`.
 
 Typical columns: `artist_id`, `artist_name`, `genres`, `tags`, `tag_count_sum`, … — **one row per artist**.
 
 - **Created** at the end of each successful SQL fetch (overwritten on the next fetch).
-- **`--use-cache`**: load this file and **skip SQL** on the next `run_local` (still runs clean + train + saves `knn_baseline_model.pkl`).
+- **`--use-cache`**: load this file and **skip SQL** on the next `train_local` (still runs clean + train + saves the artist `.pkl`).
 - **`--refresh-cache`**: force new SQL and replace the cache.
 
 Use it to iterate on training parameters without re-hitting the database.
@@ -118,32 +138,32 @@ Pickled dict for the API:
 }
 ```
 
-Produced only after training finishes. Upload this one to GCS with `upload_to_gcs`.
+Produced only after training finishes. Upload this one to GCS with `upload_artist`.
 
 ## 2. Upload to GCS (manual)
 
-After a successful `run_local`:
+After a successful `train_local`:
 
 ```bash
 gcloud config set project rec-o-gcp
 gcloud auth application-default login
-python -m ml.scripts.upload_to_gcs
+python -m ml.artist.scripts.upload_artist
 ```
 
 Custom path:
 
 ```bash
-python -m ml.scripts.upload_to_gcs --path ml/outputs/knn_baseline_model_test.pkl
+python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_baseline_model_test.pkl
 ```
 
-Default lookup (no `--path`): `models/<MODEL_LOCAL_FILENAME>`, then `ml/outputs/<MODEL_LOCAL_FILENAME>` (from `.env`).
+Default lookup (no `--path`): `models/<ARTIST_MODEL_LOCAL_FILENAME>`, then `ml/outputs/<ARTIST_MODEL_LOCAL_FILENAME>` (from `.env`).
 
 ### `.env` vs GCP credentials
 
 | Variable | Role |
 |----------|------|
-| `MODEL_LOCAL_FILENAME` | Local file `upload_to_gcs` sends (and `run_local` writes) |
-| `MODEL_BLOB_NAME` | GCS object path, e.g. `models/knn_baseline_model_test.pkl` |
+| `ARTIST_MODEL_BLOB_NAME` | Artist KNN GCS object path (API + upload) |
+| `ARTIST_MODEL_LOCAL_FILENAME` | Local file `upload_artist` looks up (and `train_local` writes) |
 | `MODEL_BUCKET_NAME` | Bucket, e.g. `rec-o-models` |
 
 **Putting only the GCP project name in `.env` does not fix a 403.** Upload uses **Application Default Credentials** (ADC). The project name does not replace a service account that lacks `storage.objects.create` on `rec-o-models` (typical error: `le-wagon-data-bootcamp@airy-cogency-493213-t4...` from another project).
@@ -166,16 +186,74 @@ If you see a path (e.g. `.../airy-cogency-493213-t4-....json`), every **new term
 unset GOOGLE_APPLICATION_CREDENTIALS
 gcloud config set project rec-o-gcp
 gcloud auth application-default login    # use a Google account with access to rec-o-gcp
-python -m ml.scripts.upload_to_gcs
+python -m ml.artist.scripts.upload_artist
 ```
 
 Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/knn_baseline_model_test.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
 
-Same section in the root [README.md](../README.md#upload-to-gcs---env-vs-gcp-credentials).
+Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
 
-## Why training is slow (full run, no `--limit`)
+---
 
-`fetch_artist_training_data` runs **2 SQL queries** on the full MusicBrainz DB:
+## Release group KNN (`ml/release_group/`)
+
+Port of `models/note_book_guillaume.ipynb` — sparse features (tags, genres, types) + sklearn `Pipeline` + KNN.
+
+### Train locally
+
+**Full DB** (slow — millions of release groups):
+
+```bash
+python -m ml.release_group.scripts.train_local
+```
+
+**Fast dev (recommended):**
+
+```bash
+python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
+```
+
+| Flag | Effect |
+|------|--------|
+| `--limit N` | Cap release groups in main SQL |
+| `--skip-type-inference` | Skip track-meta SQL for missing `type` |
+| `--use-cache` | Load `ml/outputs/release_group_training_features.pkl` |
+| `--refresh-cache` | Re-fetch SQL even with `--use-cache` |
+| `--n-neighbors N` | KNN neighbors (default `10`) |
+
+### Upload to GCS
+
+```bash
+python -m ml.release_group.scripts.upload_release_group
+```
+
+### `.env` (release group)
+
+| Variable | Role |
+|----------|------|
+| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | Local `.pkl` after `train_local` |
+| `RELEASE_GROUP_MODEL_BLOB_NAME` | GCS object path |
+| `RELEASE_GROUP_ML_MAX_ROWS` | Default `--limit` when flag omitted in scoped runs |
+| `RELEASE_GROUP_ML_TRACK_META_CHUNK_SIZE` | Batch size for type-inference SQL |
+
+### Artifact format
+
+```python
+{
+    "model_kind": "release_group_knn",
+    "pipeline": sklearn Pipeline(preprocess + knn),
+    "data_model": pd.DataFrame,
+    "id_to_idx": dict[int, int],
+    "n_neighbors": 10,
+    ...
+}
+```
+
+---
+
+## Why artist training is slow (full run, no `--limit`)
+
+`fetch_artist_knn_training_data_scoped` runs **2 SQL queries** on the full MusicBrainz DB:
 
 | # | Query | Role | Approx. size |
 |---|--------|------|----------------|
@@ -186,7 +264,7 @@ Then pandas `groupby`, sklearn fit, `joblib` save. Remote DB adds latency.
 
 ### Optimized genre SQL (when `--limit` is set)
 
-Used only in `ml/data.py` (not in `app/predictor.py`):
+Used only in `ml/artist/data.py`:
 
 - `unnest(%s::int[])` instead of thousands of `VALUES` rows
 - Skips artist-level tags in query 2 (already in query 1)
@@ -204,7 +282,7 @@ Used only in `ml/data.py` (not in `app/predictor.py`):
 }
 ```
 
-Same structure expected by `app/predictor.py` at inference.
+Same structure expected by `app/artist/recommender.py` at inference.
 
 ## Reference notebook
 

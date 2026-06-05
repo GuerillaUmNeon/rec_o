@@ -1,11 +1,15 @@
-"""Genre feature helpers (aligned with app/predictor.py)."""
+"""Artist genre feature helpers for KNN training (aligned with app inference)."""
 
 import re
 
 import pandas as pd
 
-GENRE_FEATURE_FORMAT = "genre_token_unigram"
-GENRE_TOKEN_PATTERN = r"(?u)\b\w+\b"
+ARTIST_GENRE_FEATURE_FORMAT = "genre_token_unigram"
+ARTIST_GENRE_TOKEN_PATTERN = r"(?u)\b\w+\b"
+
+# Backward-compatible aliases (artist-only pipeline today)
+GENRE_FEATURE_FORMAT = ARTIST_GENRE_FEATURE_FORMAT
+GENRE_TOKEN_PATTERN = ARTIST_GENRE_TOKEN_PATTERN
 
 
 def ordered_unique(values) -> list[str]:
@@ -25,14 +29,14 @@ def ordered_unique(values) -> list[str]:
     return result
 
 
-def genre_feature_token(genre: str) -> str:
+def artist_genre_feature_token(genre: str) -> str:
     return re.sub(r"\W+", "_", str(genre).strip().lower()).strip("_")
 
 
-def join_genre_feature_tokens(values) -> str:
+def join_artist_genre_feature_tokens(values) -> str:
     tokens = []
     for genre in ordered_unique(values):
-        token = genre_feature_token(genre)
+        token = artist_genre_feature_token(genre)
         if token:
             tokens.append(token)
     return " ".join(tokens)
