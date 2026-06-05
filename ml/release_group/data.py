@@ -177,6 +177,75 @@ SELECT
 FROM release_track_meta
 """
 
+RECORDING_GENRES_QUERY = """
+WITH artist_tag_links AS (
+        SELECT
+            r.release_group,
+            rt.tag AS tag_id
+        FROM tmp_empty_genre_rg t
+        JOIN release r
+            ON r.release_group = t.release_group_id
+        JOIN artist_credit ac
+            ON ac.id = r.artist_credit
+        JOIN artist_credit_name acn
+            ON acn.artist_credit = ac.id
+        JOIN artist_tag rt
+            ON rt.artist = acn.artist
+    ),
+    tag_counts AS (
+        SELECT
+            release_group,
+            tag_id,
+            COUNT(*) AS tag_count
+        FROM artist_tag_links
+        GROUP BY release_group, tag_id
+    ),
+    tag_with_genre AS (
+        SELECT
+            atl.release_group,
+            atl.tag_id,
+            g.id AS genre_id
+        FROM artist_tag_links atl
+        JOIN tag t
+            ON t.id = atl.tag_id
+        LEFT JOIN genre g
+            ON g.name = t.name
+    ),
+    genre_counts AS (
+        SELECT
+            release_group,
+            genre_id,
+            COUNT(*) AS genre_count
+        FROM tag_with_genre
+        WHERE genre_id IS NOT NULL
+        GROUP BY release_group, genre_id
+    ),
+    tag_buckets AS (
+        SELECT
+            release_group,
+            array_agg(DISTINCT tag_id ORDER BY tag_id) AS tag_ids
+        FROM tag_counts
+        WHERE tag_count > 1
+        GROUP BY release_group
+    ),
+    genre_buckets AS (
+        SELECT
+            release_group,
+            array_agg(DISTINCT genre_id ORDER BY genre_id) AS genre_ids
+        FROM genre_counts
+        WHERE genre_count > 0
+        GROUP BY release_group
+    )
+    SELECT
+        t.release_group_id AS id,
+        COALESCE(tb.tag_ids, ARRAY[]::integer[]) AS tag_ids,
+        COALESCE(gb.genre_ids, ARRAY[]::integer[]) AS genre_ids
+    FROM tmp_empty_genre_rg t
+    LEFT JOIN tag_buckets tb
+        ON tb.release_group = t.release_group_id
+    LEFT JOIN genre_buckets gb
+        ON gb.release_group = t.release_group_id;
+"""
 
 def _resolve_max_rows(max_rows: int | None) -> int | None:
     if max_rows is not None:
@@ -218,6 +287,74 @@ def _normalize_list_columns(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].apply(lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x]))
     return df
 
+def _is_empty_list(x) -> bool:
+    return isinstance(x, list) and len(x) == 0
+
+
+def _backfill_empty_genres_and_tags(conn, data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return data
+
+    empty_genre_rg_ids = (
+        data.loc[data["genre_ids"].apply(_is_empty_list), "id"]
+        .dropna()
+        .astype(int)
+        .unique()
+    )
+
+    print(f"Total release groups with empty genre list: {len(empty_genre_rg_ids)}")
+
+    if len(empty_genre_rg_ids) == 0:
+        print("No release groups with empty genre list.")
+        return data
+
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS tmp_empty_genre_rg (
+                release_group_id INT PRIMARY KEY
+            ) ON COMMIT DROP;
+        """)
+        cur.execute("TRUNCATE TABLE tmp_empty_genre_rg;")
+        cur.executemany(
+            "INSERT INTO tmp_empty_genre_rg (release_group_id) VALUES (%s) ON CONFLICT DO NOTHING;",
+            ((rg_id,) for rg_id in empty_genre_rg_ids),
+        )
+
+    df_result = pd.read_sql_query(RECORDING_GENRES_QUERY, conn)
+    print(f"Rows returned from fallback genre query: {len(df_result)}")
+
+    if df_result.empty:
+        return data
+
+    df_result = _normalize_list_columns(df_result)
+
+    computed_genre_map = df_result.set_index("id")["genre_ids"]
+    computed_tag_map = df_result.set_index("id")["tag_ids"]
+
+    updated = data.copy()
+
+    mask_empty_tag = updated["tag_ids"].apply(_is_empty_list)
+    mapped_tag = updated.loc[mask_empty_tag, "id"].map(computed_tag_map)
+    updated.loc[mask_empty_tag, "tag_ids"] = mapped_tag.apply(
+        lambda x: x if isinstance(x, list) else []
+    )
+
+    mask_empty_genre = updated["genre_ids"].apply(_is_empty_list)
+    mapped_genre = updated.loc[mask_empty_genre, "id"].map(computed_genre_map)
+    updated.loc[mask_empty_genre, "genre_ids"] = mapped_genre.apply(
+        lambda x: x if isinstance(x, list) else []
+    )
+
+    new_empty_tag_ids_count = updated["tag_ids"].apply(_is_empty_list).sum()
+    new_empty_genre_ids_count = updated["genre_ids"].apply(_is_empty_list).sum()
+
+    print(f"Empty tag_ids after fallback: {new_empty_tag_ids_count}")
+    print(
+        f"Empty genre_ids after fallback: {new_empty_genre_ids_count} "
+        f"({round(new_empty_genre_ids_count / updated.shape[0] * 100)}%)"
+    )
+
+    return updated
 
 def _classify_type(row) -> object:
     tn = row["track_numbers"]
@@ -277,13 +414,8 @@ def fetch_release_group_knn_training_data(
     skip_type_inference: bool = False,
     use_cache: bool = False,
     refresh_cache: bool = False,
+    backfill_empty_genres: bool = True,
 ) -> pd.DataFrame:
-    """
-    Build release group features for KNN training.
-
-    Port of models/note_book_guillaume.ipynb:
-    main tag/genre SQL + optional track-meta inference for missing `type`.
-    """
     max_rows = _resolve_max_rows(max_rows)
     cache_path = _training_cache_path()
 
@@ -309,6 +441,9 @@ def fetch_release_group_knn_training_data(
         "script": "Int32",
     })
     df = _normalize_list_columns(df)
+
+    if backfill_empty_genres:
+        df = _backfill_empty_genres_and_tags(conn, df)
 
     if not skip_type_inference:
         df = _infer_missing_types(conn, df)
