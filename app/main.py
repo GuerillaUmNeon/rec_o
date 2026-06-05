@@ -72,8 +72,8 @@ async def lifespan(app: FastAPI):
                     info.get("source"),
                     info.get("path") or info.get("gcs_uri"),
                 )
-    except RuntimeError as exc:
-        logger.error("Model loading failed at startup: %s", exc)
+    except Exception as exc:
+        logger.error("Model loading failed at startup: %s", exc, exc_info=True)
     yield
 
 
