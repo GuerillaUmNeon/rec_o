@@ -14,24 +14,106 @@ import joblib
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 APP_ROOT = Path(__file__).resolve().parent.parent
-MODEL_DIR = APP_ROOT / "models"
-DEFAULT_MODEL_FILENAME = "knn_baseline_model.pkl"
-LATEST_MODEL_PATH = APP_ROOT / DEFAULT_MODEL_FILENAME
+DEFAULT_MODEL_BLOB = "models/knn_baseline_model.pkl"
 MODEL_BUCKET_NAME = os.getenv("MODEL_BUCKET_NAME")
-MODEL_BLOB_NAME = os.getenv("MODEL_BLOB_NAME", f"models/{DEFAULT_MODEL_FILENAME}")
-CACHED_MODEL_PATH = Path(tempfile.gettempdir()) / DEFAULT_MODEL_FILENAME
+MODEL_BLOB_NAME = os.getenv("MODEL_BLOB_NAME", DEFAULT_MODEL_BLOB)
 
 model = None
+model_load_info: dict = {
+    "loaded": False,
+    "source": None,
+    "path": None,
+    "filename": None,
+    "gcs_uri": None,
+}
 
 
-def _iter_saved_models() -> list[Path]:
-    candidates = []
-    if LATEST_MODEL_PATH.is_file():
-        candidates.append(LATEST_MODEL_PATH)
-    if MODEL_DIR.is_dir():
-        candidates.extend(MODEL_DIR.glob("*.pkl"))
-        candidates.extend(MODEL_DIR.glob("*.joblib"))
-    return candidates
+def _local_model_path() -> Path | None:
+    """MODEL_LOCAL_PATH from .env (absolute or relative to project root)."""
+    raw = os.getenv("MODEL_LOCAL_PATH", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = APP_ROOT / path
+    if not path.is_file():
+        raise RuntimeError(f"MODEL_LOCAL_PATH not found: {path}")
+    return path
+
+
+def _download_model_from_gcs() -> Path | None:
+    if not MODEL_BUCKET_NAME:
+        return None
+
+    cache_path = Path(tempfile.gettempdir()) / Path(MODEL_BLOB_NAME).name
+    client = storage.Client()
+    bucket = client.bucket(MODEL_BUCKET_NAME)
+    blob = bucket.blob(MODEL_BLOB_NAME)
+
+    try:
+        if not blob.exists():
+            return None
+        blob.download_to_filename(cache_path)
+    except (GoogleAPIError, GoogleAuthError, TransportError):
+        return None
+
+    return cache_path
+
+
+def _resolve_model_path() -> tuple[Path, str] | None:
+    local = _local_model_path()
+    if local is not None:
+        return local, "local"
+    gcs_path = _download_model_from_gcs()
+    if gcs_path is not None:
+        return gcs_path, "gcs"
+    return None
+
+
+def _set_model_load_info(*, loaded: bool, source: str | None = None, path: Path | None = None) -> None:
+    global model_load_info
+    if not loaded:
+        model_load_info = {
+            "loaded": False,
+            "source": None,
+            "path": None,
+            "filename": None,
+            "gcs_uri": None,
+        }
+        return
+
+    info = {
+        "loaded": True,
+        "source": source,
+        "path": str(path),
+        "filename": path.name if path else None,
+        "gcs_uri": None,
+    }
+    if source == "gcs" and MODEL_BUCKET_NAME:
+        info["gcs_uri"] = f"gs://{MODEL_BUCKET_NAME}/{MODEL_BLOB_NAME}"
+    model_load_info = info
+
+
+def get_model_info() -> dict:
+    """Return which artifact is loaded and whether it came from local disk or GCS."""
+    return dict(model_load_info)
+
+
+def load_model():
+    """Load artifact from MODEL_LOCAL_PATH or GCS (MODEL_BUCKET_NAME + MODEL_BLOB_NAME)."""
+    global model
+
+    resolved = _resolve_model_path()
+    if resolved is None:
+        model = None
+        _set_model_load_info(loaded=False)
+        return None
+
+    model_path, source = resolved
+    model = joblib.load(model_path)
+    _set_model_load_info(loaded=True, source=source, path=model_path)
+    return model
+
 
 def predict_artist(artist_ids, conn):
     """
@@ -113,44 +195,6 @@ def predict_artist(artist_ids, conn):
 
     return grouped
 
-def get_latest_model_path() -> Path | None:
-    saved_models = _iter_saved_models()
-    if not saved_models:
-        return None
-    return max(saved_models, key=lambda path: path.stat().st_mtime)
-
-
-def _download_model_from_gcs() -> Path | None:
-    if not MODEL_BUCKET_NAME:
-        return None
-
-    client = storage.Client()
-    bucket = client.bucket(MODEL_BUCKET_NAME)
-    blob = bucket.blob(MODEL_BLOB_NAME)
-
-    try:
-        if not blob.exists():
-            return None
-
-        blob.download_to_filename(CACHED_MODEL_PATH)
-    except (GoogleAPIError, GoogleAuthError, TransportError):
-        return None
-
-    return CACHED_MODEL_PATH
-
-
-def load_latest_model():
-    global model
-
-    model_path = get_latest_model_path() or _download_model_from_gcs()
-    if model_path is None:
-        model = None
-        return None
-
-    model = joblib.load(model_path)
-    return model
-
-
 def _recommend_artist_ids_from_artifact(
     artifact: dict,
     artist_ids: list[int],
@@ -203,7 +247,7 @@ def _recommend_artist_ids_from_artifact(
 
 def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
     if model is None:
-        load_latest_model()
+        load_model()
     if model is None:
         raise RuntimeError(
             "No model available. Train with: python -m ml.scripts.run_local "

@@ -5,7 +5,9 @@ Exposes HTTP routes, API key authentication, rate limiting,
 and MusicBrainz prediction / search endpoints.
 """
 
+import logging
 import os
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
@@ -15,7 +17,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.database import fetch_all, get_connection
-from app.predictor import predict_playlist, predict_artist
+from app.predictor import get_model_info, load_model, predict_artist, predict_playlist
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
@@ -38,9 +40,32 @@ from app.schemas import (
 # Load variables from .env (TOKEN_API_KEY, POSTGRES, etc.)
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # Expected key in the X-API-Key header for protected routes
 API_KEY = os.getenv("TOKEN_API_KEY")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load the KNN artifact once at startup (local file or GCS), before serving traffic."""
+    try:
+        if load_model() is None:
+            logger.warning(
+                "Recommender model not loaded at startup — "
+                "set MODEL_LOCAL_PATH or MODEL_BUCKET_NAME + MODEL_BLOB_NAME."
+            )
+        else:
+            info = get_model_info()
+            logger.info(
+                "Recommender model loaded at startup (%s): %s",
+                info.get("source"),
+                info.get("path") or info.get("gcs_uri"),
+            )
+    except RuntimeError as exc:
+        logger.error("Recommender model failed to load at startup: %s", exc)
+    yield
 
 
 def get_client_ip(request: Request) -> str:
@@ -60,7 +85,7 @@ def get_client_ip(request: Request) -> str:
 
 # Limit requests per IP (slowapi)
 limiter = Limiter(key_func=get_client_ip)
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -90,6 +115,13 @@ def verify_api_key(api_key: str | None = Security(api_key_header)) -> str:
 def read_root(request: Request):
     """Health / test route: no API key required."""
     return {"message": "Hello, World!"}
+
+
+@app.get("/model")
+@limiter.limit("60/minute")
+def model_status(request: Request):
+    """Which recommender artifact is loaded (local path or GCS URI). No API key required."""
+    return get_model_info()
 
 
 @app.post("/predict/artist", response_model=PlaylistOutput)

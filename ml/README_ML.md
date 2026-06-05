@@ -2,7 +2,7 @@
 
 Train the KNN artist recommender **locally**, then upload to GCS **manually** when ready.
 
-This folder is a **copy** of training logic from `app/predictor.py` and `notebooks/note_book_joris.ipynb`. The API in `app/` is unchanged (duplicate code for now).
+Offline training lives here. The API in [`app/`](../app/README_APP.md) only loads a trained artifact and serves HTTP routes.
 
 ## Layout
 
@@ -46,11 +46,11 @@ MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
 | Variable | Used by | Prod value |
 |----------|---------|------------|
 | `MODEL_LOCAL_FILENAME` | `run_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
-| `MODEL_BLOB_NAME` | `upload_to_gcs` only | `models/knn_baseline_model.pkl` |
+| `MODEL_BLOB_NAME` | `upload_to_gcs` (+ API download if same `.env`) | `models/knn_baseline_model.pkl` |
 
 Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — your local `.env` test values do not change prod until you upload to the prod blob path.
 
-**Local API with the test model:** put `knn_baseline_model_test.pkl` in `models/` (after `run_local`) and set `MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl` in `.env` for GCS fallback. `app/predictor.py` picks the **newest** `.pkl` in `models/` (or `knn_baseline_model.pkl` at project root). To force the test file, remove/rename other `.pkl` in `models/` or copy the test artifact to `knn_baseline_model.pkl` at the project root.
+**Run the API with the test model:** after `run_local`, upload with `upload_to_gcs` or set `MODEL_LOCAL_PATH` — see [app/README_APP.md](../app/README_APP.md).
 
 ## 1. Train and save locally
 
@@ -171,7 +171,7 @@ python -m ml.scripts.upload_to_gcs
 
 Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/knn_baseline_model_test.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
 
-Same section in the root [README.md](../README.md#upload-to-gcs---env-vs-gcp-credentials).
+Production Cloud Run keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbuild.yaml` — local test values in `.env` do not change prod until you upload to the prod blob path.
 
 ## Why training is slow (full run, no `--limit`)
 
