@@ -5,3 +5,5 @@ app/__pycache__/
 .env
 *.pkl
 *.joblib
+ml/outputs/
+!ml/outputs/.gitkeep
