@@ -57,8 +57,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 **Train and publish a model** (offline):
 
 ```bash
-python -m ml.scripts.run_local
-python -m ml.scripts.upload_to_gcs
+python -m ml.artist.scripts.train_local
+python -m ml.artist.scripts.upload_artist
 ```
 
 Details: [ml/README_ML.md](ml/README_ML.md).
@@ -92,4 +92,4 @@ APIs enabled for the project:
 
 Production: create matching secrets in Secret Manager (`TOKEN_API_KEY`, `POSTGRES`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_PORT`, `DATABASE_URL`); `cloudbuild.yaml` mounts them on Cloud Run at deploy time. Do not commit `.env`.
 
-Prod model path: Secret Manager `MODEL_BLOB_NAME` (default `models/knn_baseline_model.pkl`). Use test blob names in local `.env` to avoid overwriting prod on GCS.
+Prod artist model: Secret Manager `ARTIST_MODEL_BLOB_NAME` (default `models/knn_baseline_model.pkl`). Use test blob names in local `.env` to avoid overwriting prod on GCS.

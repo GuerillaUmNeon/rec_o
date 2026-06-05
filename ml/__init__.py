@@ -1,1 +1,1 @@
-"""Offline ML pipeline: fetch training data, train KNN, save and upload to GCS."""
+"""Offline ML pipelines. Artist KNN training lives in ml.artist."""

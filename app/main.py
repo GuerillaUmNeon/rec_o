@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
         if load_model() is None:
             logger.warning(
                 "Recommender model not loaded at startup — "
-                "set MODEL_LOCAL_PATH or MODEL_BUCKET_NAME + MODEL_BLOB_NAME."
+                "set ARTIST_MODEL_LOCAL_PATH or MODEL_BUCKET_NAME + ARTIST_MODEL_BLOB_NAME."
             )
         else:
             info = get_model_info()

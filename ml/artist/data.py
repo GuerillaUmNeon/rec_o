@@ -1,16 +1,32 @@
 """
-Fetch artist training features from MusicBrainz.
+Fetch artist KNN training features from MusicBrainz.
 
-Aligned with app/predictor.py (genre tokens + recommender temp-table path).
+Genre tokens aligned with app inference (predictor.py).
 """
 
 import os
 import time
+from pathlib import Path
 
 import pandas as pd
 
-from ml.config import ML_GENRE_CHUNK_SIZE, ML_MAX_ARTISTS, TRAINING_FEATURES_CACHE
-from ml.features import join_genre_feature_tokens, ordered_unique
+from ml.artist.config import (
+    ARTIST_ML_GENRE_CHUNK_SIZE,
+    ARTIST_ML_MAX_ARTISTS,
+    ARTIST_TRAINING_FEATURES_CACHE,
+    ML_OUTPUTS_DIR,
+)
+from ml.artist.features import join_artist_genre_feature_tokens, ordered_unique
+
+
+def _artist_training_cache_path() -> Path:
+    """Prefer artist cache; fall back to legacy training_features.pkl if present."""
+    legacy = ML_OUTPUTS_DIR / "training_features.pkl"
+    if ARTIST_TRAINING_FEATURES_CACHE.is_file():
+        return ARTIST_TRAINING_FEATURES_CACHE
+    if legacy.is_file():
+        return legacy
+    return ARTIST_TRAINING_FEATURES_CACHE
 
 def _sql_values_placeholders(values: list[int]) -> str:
     return ",".join(["(%s)"] * len(values))
@@ -416,7 +432,7 @@ def _fetch_extended_artist_genres(
     if not artist_ids:
         return pd.DataFrame(columns=["id", "genre"])
 
-    chunk_size = chunk_size or ML_GENRE_CHUNK_SIZE
+    chunk_size = chunk_size or ARTIST_ML_GENRE_CHUNK_SIZE
     query = _artist_genres_query_training()
     chunks: list[pd.DataFrame] = []
     total = len(artist_ids)
@@ -446,7 +462,7 @@ def _fetch_extended_artist_genres(
 def _resolve_max_artists(max_artists: int | None) -> int | None:
     if max_artists is not None:
         return max_artists
-    env_limit = os.getenv("ML_MAX_ARTISTS") or ML_MAX_ARTISTS
+    env_limit = os.getenv("ARTIST_ML_MAX_ARTISTS") or ARTIST_ML_MAX_ARTISTS
     if not env_limit:
         return None
     return int(env_limit)
@@ -470,7 +486,7 @@ def _artist_scope_sql(max_artists: int | None) -> tuple[str, list]:
     )
 
 
-def fetch_artist_training_data(
+def fetch_artist_knn_training_data_scoped(
     conn,
     *,
     max_artists: int | None = None,
@@ -485,13 +501,13 @@ def fetch_artist_training_data(
     keeps every artist that has a genre from artist, release group, or release
     tags (skipped when skip_extended_genres=True).
 
-    Use max_artists or ML_MAX_ARTISTS to avoid scanning the full MusicBrainz DB.
+    Use max_artists or ARTIST_ML_MAX_ARTISTS to avoid scanning the full MusicBrainz DB.
     """
     max_artists = _resolve_max_artists(max_artists)
 
-    if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
-        print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")
-        return pd.read_pickle(TRAINING_FEATURES_CACHE)
+    if use_cache and not refresh_cache and _artist_training_cache_path().is_file():
+        print(f"Loading cached training data from {_artist_training_cache_path()}")
+        return pd.read_pickle(_artist_training_cache_path())
 
     scope_sql, scope_params = _artist_scope_sql(max_artists)
     artist_query = f"""
@@ -556,7 +572,7 @@ def fetch_artist_training_data(
         )
         .agg(
             tags=("tag", lambda values: " ".join(ordered_unique(values))),
-            tag_genres=("genre", join_genre_feature_tokens),
+            tag_genres=("genre", join_artist_genre_feature_tokens),
             tag_count_sum=("tag_count", lambda values: values.dropna().clip(lower=0).sum()),
         )
     )
@@ -566,7 +582,7 @@ def fetch_artist_training_data(
     else:
         artist_genres = (
             artist_genres.groupby("id", as_index=False)["genre"]
-            .agg(join_genre_feature_tokens)
+            .agg(join_artist_genre_feature_tokens)
             .rename(columns={"id": "artist_id", "genre": "all_genres"})
         )
         grouped = grouped.merge(artist_genres, on="artist_id", how="left")
@@ -581,15 +597,15 @@ def fetch_artist_training_data(
     grouped = grouped.drop(columns=["tag_genres", "all_genres"])
     grouped["tag_count_sum"] = grouped["tag_count_sum"].fillna(0)
 
-    if not (use_cache and TRAINING_FEATURES_CACHE.is_file() and not refresh_cache):
-        TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        grouped.to_pickle(TRAINING_FEATURES_CACHE)
-        print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
+    if not (use_cache and _artist_training_cache_path().is_file() and not refresh_cache):
+        _artist_training_cache_path().parent.mkdir(parents=True, exist_ok=True)
+        grouped.to_pickle(_artist_training_cache_path())
+        print(f"Cached training features to {_artist_training_cache_path()}")
 
     return grouped
 
 
-def fetch_artist_recommender_training_data(
+def fetch_artist_knn_training_data(
     conn,
     *,
     use_cache: bool = False,
@@ -600,9 +616,9 @@ def fetch_artist_recommender_training_data(
 
     Full DB scan via temp tables (offline training only).
     """
-    if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
-        print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")
-        return pd.read_pickle(TRAINING_FEATURES_CACHE)
+    if use_cache and not refresh_cache and _artist_training_cache_path().is_file():
+        print(f"Loading cached training data from {_artist_training_cache_path()}")
+        return pd.read_pickle(_artist_training_cache_path())
 
     setup_steps = [
         """
@@ -858,11 +874,16 @@ def fetch_artist_recommender_training_data(
             ]
         )
 
-    grouped["genres"] = grouped.pop("genre_names").apply(join_genre_feature_tokens)
+    grouped["genres"] = grouped.pop("genre_names").apply(join_artist_genre_feature_tokens)
     grouped = grouped[grouped["genres"].str.strip() != ""].copy()
 
-    TRAINING_FEATURES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    grouped.to_pickle(TRAINING_FEATURES_CACHE)
-    print(f"Cached training features to {TRAINING_FEATURES_CACHE}")
+    _artist_training_cache_path().parent.mkdir(parents=True, exist_ok=True)
+    grouped.to_pickle(_artist_training_cache_path())
+    print(f"Cached training features to {_artist_training_cache_path()}")
 
     return grouped
+
+
+# Backward-compatible aliases
+fetch_artist_training_data = fetch_artist_knn_training_data_scoped
+fetch_artist_recommender_training_data = fetch_artist_knn_training_data

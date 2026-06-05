@@ -14,9 +14,12 @@ import joblib
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 APP_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MODEL_BLOB = "models/knn_baseline_model.pkl"
+DEFAULT_ARTIST_MODEL_BLOB = "models/knn_baseline_model.pkl"
 MODEL_BUCKET_NAME = os.getenv("MODEL_BUCKET_NAME")
-MODEL_BLOB_NAME = os.getenv("MODEL_BLOB_NAME", DEFAULT_MODEL_BLOB)
+ARTIST_MODEL_BLOB_NAME = os.getenv(
+    "ARTIST_MODEL_BLOB_NAME",
+    os.getenv("MODEL_BLOB_NAME", DEFAULT_ARTIST_MODEL_BLOB),
+)
 
 model = None
 model_load_info: dict = {
@@ -29,15 +32,18 @@ model_load_info: dict = {
 
 
 def _local_model_path() -> Path | None:
-    """MODEL_LOCAL_PATH from .env (absolute or relative to project root)."""
-    raw = os.getenv("MODEL_LOCAL_PATH", "").strip()
+    """ARTIST_MODEL_LOCAL_PATH from .env (absolute or relative to project root)."""
+    raw = (
+        os.getenv("ARTIST_MODEL_LOCAL_PATH", "").strip()
+        or os.getenv("MODEL_LOCAL_PATH", "").strip()
+    )
     if not raw:
         return None
     path = Path(raw)
     if not path.is_absolute():
         path = APP_ROOT / path
     if not path.is_file():
-        raise RuntimeError(f"MODEL_LOCAL_PATH not found: {path}")
+        raise RuntimeError(f"ARTIST_MODEL_LOCAL_PATH not found: {path}")
     return path
 
 
@@ -45,10 +51,10 @@ def _download_model_from_gcs() -> Path | None:
     if not MODEL_BUCKET_NAME:
         return None
 
-    cache_path = Path(tempfile.gettempdir()) / Path(MODEL_BLOB_NAME).name
+    cache_path = Path(tempfile.gettempdir()) / Path(ARTIST_MODEL_BLOB_NAME).name
     client = storage.Client()
     bucket = client.bucket(MODEL_BUCKET_NAME)
-    blob = bucket.blob(MODEL_BLOB_NAME)
+    blob = bucket.blob(ARTIST_MODEL_BLOB_NAME)
 
     try:
         if not blob.exists():
@@ -90,7 +96,7 @@ def _set_model_load_info(*, loaded: bool, source: str | None = None, path: Path 
         "gcs_uri": None,
     }
     if source == "gcs" and MODEL_BUCKET_NAME:
-        info["gcs_uri"] = f"gs://{MODEL_BUCKET_NAME}/{MODEL_BLOB_NAME}"
+        info["gcs_uri"] = f"gs://{MODEL_BUCKET_NAME}/{ARTIST_MODEL_BLOB_NAME}"
     model_load_info = info
 
 
@@ -100,7 +106,7 @@ def get_model_info() -> dict:
 
 
 def load_model():
-    """Load artifact from MODEL_LOCAL_PATH or GCS (MODEL_BUCKET_NAME + MODEL_BLOB_NAME)."""
+    """Load artist artifact from ARTIST_MODEL_LOCAL_PATH or GCS (MODEL_BUCKET_NAME + ARTIST_MODEL_BLOB_NAME)."""
     global model
 
     resolved = _resolve_model_path()
@@ -250,8 +256,8 @@ def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
         load_model()
     if model is None:
         raise RuntimeError(
-            "No model available. Train with: python -m ml.scripts.run_local "
-            "then upload: python -m ml.scripts.upload_to_gcs"
+            "No model available. Train with: python -m ml.artist.scripts.train_local "
+            "then upload: python -m ml.artist.scripts.upload_artist"
         )
 
     if isinstance(model, dict):

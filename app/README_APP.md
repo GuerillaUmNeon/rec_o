@@ -38,16 +38,17 @@ The recommender `.pkl` is loaded **once at startup** via FastAPI **lifespan** (`
 
 | Priority | Variable(s) | When to use |
 |----------|-------------|-------------|
-| **1 — Local file** | `MODEL_LOCAL_PATH` | Dev: test a `.pkl` on disk without GCS |
-| **2 — GCS** | `MODEL_BUCKET_NAME` + `MODEL_BLOB_NAME` | Same as prod / Docker / Cloud Run |
+| **1 — Local file** | `ARTIST_MODEL_LOCAL_PATH` | Dev: test a `.pkl` on disk without GCS |
+| **2 — GCS** | `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` | Same as prod / Docker / Cloud Run |
 
-If `MODEL_LOCAL_PATH` is set, GCS is **not** used (even if `MODEL_BUCKET_NAME` is set).  
-Path can be absolute or relative to the **project root** (e.g. `models/knn_baseline_model_test.pkl`).
+If `ARTIST_MODEL_LOCAL_PATH` is set, GCS is **not** used (even if `MODEL_BUCKET_NAME` is set).  
+Path can be absolute or relative to the **project root** (e.g. `models/knn_baseline_model_test.pkl`).  
+Legacy `MODEL_LOCAL_PATH` / `MODEL_BLOB_NAME` still work as fallbacks.
 
-If `MODEL_LOCAL_PATH` is missing, the API downloads from GCS to a **temp cache**:
+If `ARTIST_MODEL_LOCAL_PATH` is missing, the API downloads from GCS to a **temp cache**:
 
 ```
-gs://<MODEL_BUCKET_NAME>/<MODEL_BLOB_NAME>
+gs://<MODEL_BUCKET_NAME>/<ARTIST_MODEL_BLOB_NAME>
     →  /tmp/<filename>.pkl   (e.g. /tmp/knn_baseline_model_test2.pkl)
     →  loaded into memory with joblib
 ```
@@ -58,29 +59,30 @@ That `/tmp/...` path is **runtime only** (not in the Docker image; gone when the
 
 ```bash
 MODEL_BUCKET_NAME=rec-o-models
-MODEL_BLOB_NAME=models/knn_baseline_model_test2.pkl
-# no MODEL_LOCAL_PATH
+ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model_test2.pkl
+# no ARTIST_MODEL_LOCAL_PATH
 ```
 
 ### Example `.env` — local file only
 
 ```bash
-MODEL_LOCAL_PATH=models/knn_baseline_model_test2.pkl
+ARTIST_MODEL_LOCAL_PATH=models/knn_baseline_model_test2.pkl
 ```
 
 ### ML vs API variables
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
-| `MODEL_LOCAL_FILENAME` | **`ml/`** only | Name of file written by `run_local` (`models/`, `ml/outputs/`) |
-| `MODEL_LOCAL_PATH` | **`app/`** only | Explicit path for the API to load |
-| `MODEL_BUCKET_NAME`, `MODEL_BLOB_NAME` | **`ml/`** (upload) + **`app/`** (download) | GCS bucket and object path |
+| `ARTIST_MODEL_LOCAL_FILENAME` | **`ml/artist/`** only | Name of file written by `train_local` (`models/`, `ml/outputs/`) |
+| `ARTIST_MODEL_LOCAL_PATH` | **`app/`** only | Explicit path for the API to load |
+| `MODEL_BUCKET_NAME` | **`app/`** + **`ml/`** | Shared GCS bucket (all models) |
+| `ARTIST_MODEL_BLOB_NAME` | **`app/`** (download) + **`ml/artist/`** (upload) | Artist KNN object path |
 
 Train and upload first:
 
 ```bash
-python -m ml.scripts.run_local
-python -m ml.scripts.upload_to_gcs
+python -m ml.artist.scripts.train_local
+python -m ml.artist.scripts.upload_artist
 ```
 
 See [ml/README_ML.md](../ml/README_ML.md).
@@ -98,7 +100,7 @@ gcloud auth application-default login
 ```
 
 On **Cloud Run**, the service account is configured automatically (no `gcloud login`).  
-`MODEL_BUCKET_NAME` and `MODEL_BLOB_NAME` come from **Secret Manager** (mounted at deploy) — update the secrets and deploy a new revision to switch models without rebuilding the image.
+`MODEL_BUCKET_NAME` and `ARTIST_MODEL_BLOB_NAME` come from **Secret Manager** (mounted at deploy) — update the artist blob secret and deploy a new revision to switch models without rebuilding the image.
 
 ## Check which model is active
 
@@ -143,7 +145,7 @@ docker run --name rec-o-api -p 8000:8000 --env-file .env rec-o
 ```
 
 The image contains **only** `app/` + Python deps. No `models/`, no `ml/`, no `.pkl`.  
-With `MODEL_BUCKET_NAME` + `MODEL_BLOB_NAME` in `--env-file`, the container downloads from GCS at startup (needs valid credentials in the environment or a service account on Cloud Run).
+With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` in `--env-file`, the container downloads from GCS at startup (needs valid credentials in the environment or a service account on Cloud Run).
 
 ## Endpoints
 
