@@ -76,29 +76,16 @@ X-API-Key: <TOKEN_API_KEY>
 
 In Swagger, use **Authorize** and enter the same value.
 
-## Save the latest model
+## Model training and deployment
 
-The API loads the latest KNN recommender artifact from Google Cloud Storage when `MODEL_BUCKET_NAME` is configured.
+Training lives in **`ml/`** (not `app/`). The API only **loads** a pre-trained artifact at runtime (local file or GCS).
 
-The final model must be saved as an artifact containing the fitted vectorizer, fitted KNN model, and cleaned dataframe:
-
-```python
-from app.database import get_connection
-from app.predictor import save_model, train_artist_recommender
-
-with get_connection() as conn:
-    artifact = train_artist_recommender(conn)
-
-save_model(artifact)
+```bash
+python -m ml.scripts.run_local
+python -m ml.scripts.upload_to_gcs
 ```
 
-Artist genres are normalized before training so each MusicBrainz genre is one
-TF-IDF feature: `east coast hip hop` becomes `east_coast_hip_hop`. The vectorizer
-uses `ngram_range=(1, 1)`, so similarities are computed genre by genre.
-
-This creates a local copy in `models/`, updates `knn_baseline_model.pkl`, and uploads that file to `gs://$MODEL_BUCKET_NAME/$MODEL_BLOB_NAME`.
-
-Offline training and upload (recommended): [ml/README_ML.md](ml/README_ML.md).
+See [ml/README_ML.md](ml/README_ML.md). Cloud Run loads from `gs://$MODEL_BUCKET_NAME/$MODEL_BLOB_NAME` when `MODEL_BUCKET_NAME` is set.
 
 ### Upload to GCS — `.env` vs GCP credentials
 

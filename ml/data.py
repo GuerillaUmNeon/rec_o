@@ -598,7 +598,7 @@ def fetch_artist_recommender_training_data(
     """
     Build genre-only artist features for the KNN recommender (temp tables).
 
-    Same pipeline as app/predictor.train_artist_recommender — full DB scan.
+    Full DB scan via temp tables (offline training only).
     """
     if use_cache and not refresh_cache and TRAINING_FEATURES_CACHE.is_file():
         print(f"Loading cached training data from {TRAINING_FEATURES_CACHE}")

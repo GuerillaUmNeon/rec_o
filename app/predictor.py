@@ -1,7 +1,9 @@
+"""Inference only: load artifact, predict playlist, enrich artist rows. Training is in ml/."""
+
 import os
 from pathlib import Path
 import tempfile
-from datetime import datetime, timezone
+
 import pandas as pd
 from dotenv import load_dotenv
 from google.api_core.exceptions import GoogleAPIError
@@ -137,16 +139,6 @@ def _download_model_from_gcs() -> Path | None:
     return CACHED_MODEL_PATH
 
 
-def _upload_model_to_gcs(model_path: Path) -> None:
-    if not MODEL_BUCKET_NAME:
-        return
-
-    client = storage.Client()
-    bucket = client.bucket(MODEL_BUCKET_NAME)
-    blob = bucket.blob(MODEL_BLOB_NAME)
-    blob.upload_from_filename(model_path)
-
-
 def load_latest_model():
     global model
 
@@ -157,27 +149,6 @@ def load_latest_model():
 
     model = joblib.load(model_path)
     return model
-
-
-def save_model(trained_model, filename: str | None = None) -> Path:
-    global model
-
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-
-    if filename is None:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        filename = f"knn_baseline_model_{timestamp}.pkl"
-
-    model_path = MODEL_DIR / Path(filename).name
-    if model_path.suffix not in {".pkl", ".joblib"}:
-        model_path = model_path.with_suffix(".pkl")
-
-    joblib.dump(trained_model, model_path)
-    joblib.dump(trained_model, LATEST_MODEL_PATH)
-    _upload_model_to_gcs(LATEST_MODEL_PATH)
-    model = trained_model
-
-    return model_path
 
 
 def _recommend_artist_ids_from_artifact(
@@ -234,7 +205,10 @@ def predict_playlist(artist_ids: list[int], top_n: int = 5) -> list[int]:
     if model is None:
         load_latest_model()
     if model is None:
-        raise RuntimeError("No model saved yet. Train a model and call save_model(model).")
+        raise RuntimeError(
+            "No model available. Train with: python -m ml.scripts.run_local "
+            "then upload: python -m ml.scripts.upload_to_gcs"
+        )
 
     if isinstance(model, dict):
         recommendations = _recommend_artist_ids_from_artifact(model, artist_ids, top_n)

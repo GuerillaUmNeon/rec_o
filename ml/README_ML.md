@@ -54,7 +54,7 @@ Cloud Run prod keeps `MODEL_BLOB_NAME=models/knn_baseline_model.pkl` in `cloudbu
 
 ## 1. Train and save locally
 
-**Full DB (same as `app/predictor.train_artist_recommender`)** — temp tables + genre tokens:
+**Full DB** — temp tables + genre tokens:
 
 ```bash
 python -m ml.scripts.run_local

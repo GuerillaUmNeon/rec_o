@@ -1,7 +1,7 @@
 """
 Save trained artifacts locally (no GCS).
 
-Copied from app/predictor.py (save only; upload is ml/scripts/upload_to_gcs.py).
+Local artifact save only (upload: ml/scripts/upload_to_gcs.py). Training is not in app/.
 """
 
 from datetime import datetime, timezone
