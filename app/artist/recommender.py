@@ -7,6 +7,7 @@ def _recommend_artist_ids_from_artifact(
     artifact: dict,
     artist_ids: list[int],
     top_n: int,
+    blacklist_artist_ids: list[int] | None = None,
 ) -> list[int]:
     recommender = artifact["model"]
     vectorizer = artifact["vectorizer"]
@@ -24,11 +25,18 @@ def _recommend_artist_ids_from_artifact(
     df_clean["genres"] = df_clean["genres"].fillna("")
 
     seed_ids = {int(artist_id) for artist_id in artist_ids}
+    blacklist_ids = {
+        int(artist_id)
+        for artist_id in (blacklist_artist_ids or [])
+    }
+    excluded_ids = seed_ids | blacklist_ids
     matches = df_clean[df_clean["artist_id"].isin(seed_ids)]
     found_ids = {int(artist_id) for artist_id in matches["artist_id"].tolist()}
     missing_ids = sorted(seed_ids - found_ids)
     if missing_ids:
-        raise RuntimeError(f"Unknown artist IDs: {missing_ids}")
+        raise RuntimeError(
+            f"Artiste inconnu dans la base de données: {missing_ids}"
+        )
 
     query_vectors = vectorizer.transform(matches["genres"].astype(str))
     if len(matches) == 1:
@@ -36,25 +44,47 @@ def _recommend_artist_ids_from_artifact(
     else:
         query_vector = query_vectors.mean(axis=0).A
 
-    n_neighbors = min(len(df_clean), top_n + len(seed_ids) + 50)
-    distances, indices = recommender.kneighbors(query_vector, n_neighbors=n_neighbors)
+    if len(excluded_ids) >= len(df_clean):
+        raise RuntimeError(
+            "Pas assez de recommandations disponibles après application de la blacklist."
+        )
 
+    n_neighbors = min(len(df_clean), top_n + len(excluded_ids) + 50)
     recommendations = []
-    for idx in indices[0]:
-        row = df_clean.iloc[idx]
-        artist_id = int(row["artist_id"])
 
-        if artist_id in seed_ids or artist_id in recommendations:
-            continue
+    while True:
+        _, indices = recommender.kneighbors(
+            query_vector,
+            n_neighbors=n_neighbors,
+        )
 
-        recommendations.append(artist_id)
-        if len(recommendations) >= top_n:
+        for idx in indices[0]:
+            row = df_clean.iloc[idx]
+            artist_id = int(row["artist_id"])
+
+            if artist_id in excluded_ids or artist_id in recommendations:
+                continue
+
+            recommendations.append(artist_id)
+            if len(recommendations) >= top_n:
+                return recommendations
+
+        if n_neighbors >= len(df_clean):
             break
+
+        n_neighbors = min(
+            len(df_clean),
+            max(n_neighbors * 2, n_neighbors + top_n + len(excluded_ids) + 50),
+        )
 
     return recommendations
 
 
-def recommend_artist_ids(artist_ids: list[int], top_n: int = 5) -> list[int]:
+def recommend_artist_ids(
+    artist_ids: list[int],
+    top_n: int = 5,
+    blacklist_artist_ids: list[int] | None = None,
+) -> list[int]:
     model = get_artist_model()
     if model is None:
         load_artist_model()
@@ -67,9 +97,16 @@ def recommend_artist_ids(artist_ids: list[int], top_n: int = 5) -> list[int]:
         )
 
     if isinstance(model, dict):
-        recommendations = _recommend_artist_ids_from_artifact(model, artist_ids, top_n)
-        if not recommendations:
-            raise RuntimeError("No recommendation found for these artist IDs.")
+        recommendations = _recommend_artist_ids_from_artifact(
+            model,
+            artist_ids,
+            top_n,
+            blacklist_artist_ids=blacklist_artist_ids,
+        )
+        if len(recommendations) < top_n:
+            raise RuntimeError(
+                "Pas assez de recommandations disponibles après application de la blacklist."
+            )
         return recommendations
 
     pred_result = model.predict([artist_ids])[0]
@@ -77,4 +114,17 @@ def recommend_artist_ids(artist_ids: list[int], top_n: int = 5) -> list[int]:
         pred_result = pred_result.tolist()
     if not isinstance(pred_result, list):
         pred_result = list(pred_result)
-    return [int(artist_id) for artist_id in pred_result[:top_n]]
+    excluded_ids = {
+        int(artist_id)
+        for artist_id in [*artist_ids, *(blacklist_artist_ids or [])]
+    }
+    recommendations = [
+        int(artist_id)
+        for artist_id in pred_result
+        if int(artist_id) not in excluded_ids
+    ]
+    if len(recommendations) < top_n:
+        raise RuntimeError(
+            "Pas assez de recommandations disponibles après application de la blacklist."
+        )
+    return recommendations[:top_n]

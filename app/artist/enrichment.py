@@ -30,6 +30,7 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
         FROM artist
         LEFT JOIN artist_tag
             ON artist_tag.artist = artist.id
+           AND artist_tag.count >= 1
         LEFT JOIN tag
             ON artist_tag.tag = tag.id
         LEFT JOIN genre
@@ -43,7 +44,6 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
         LEFT JOIN link_type
             ON link_type.id = link.link_type
         WHERE artist.id IN ({placeholders})
-          AND artist_tag.count > 0
     """
 
     result = pd.read_sql_query(query, conn, params=artist_ids)

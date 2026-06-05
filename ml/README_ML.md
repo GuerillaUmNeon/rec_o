@@ -41,7 +41,7 @@ Each subpackage uses `train_local` + `upload_*` separately (no single pipeline s
 - `.env` with Postgres (`DATABASE_URL` or `POSTGRES`, `DATABASE`, etc.)
 - For upload only:
   - `MODEL_BUCKET_NAME=rec-o-models`
-  - `ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model.pkl`
+  - `ARTIST_MODEL_BLOB_NAME=models/knn_model_test_joris_slim.pkl`
   - `RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model.pkl`
   - `gcloud auth application-default login` on project **rec-o-gcp**
   - IAM: **Storage Object Creator** on bucket `rec-o-models`
@@ -54,8 +54,8 @@ Optional in `.env`:
 # ARTIST_ML_GENRE_CHUNK_SIZE=2000
 
 # Test artifact names (do not overwrite prod)
-ARTIST_MODEL_BLOB_NAME=models/knn_baseline_model_test.pkl
-ARTIST_MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
+ARTIST_MODEL_BLOB_NAME=models/knn_model_test_joris_slim.pkl
+ARTIST_MODEL_LOCAL_FILENAME=knn_model_test_joris_slim.pkl
 ```
 
 `MODEL_BUCKET_NAME` is shared across models. Legacy `MODEL_BLOB_NAME`, `MODEL_LOCAL_FILENAME`, `ML_MAX_ARTISTS`, `ML_GENRE_CHUNK_SIZE` still work as fallbacks.
@@ -63,8 +63,8 @@ ARTIST_MODEL_LOCAL_FILENAME=knn_baseline_model_test.pkl
 | Variable | Used by | Prod value |
 |----------|---------|------------|
 | `MODEL_BUCKET_NAME` | API + ML upload (all models) | `rec-o-models` |
-| `ARTIST_MODEL_BLOB_NAME` | API download + `upload_artist` | `models/knn_baseline_model.pkl` |
-| `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `knn_baseline_model.pkl` |
+| `ARTIST_MODEL_BLOB_NAME` | API download + `upload_artist` | `models/knn_model_test_joris_slim.pkl` |
+| `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `knn_model_test_joris_slim.pkl` |
 | `RELEASE_GROUP_MODEL_BLOB_NAME` | API download + `upload_release_group` | `models/release_group_knn_model.pkl` |
 | `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `release_group_knn_model.pkl` |
 
@@ -124,7 +124,7 @@ Typical columns: `artist_id`, `artist_name`, `genres`, `tags`, `tag_count_sum`, 
 
 Use it to iterate on training parameters without re-hitting the database.
 
-#### `knn_baseline_model.pkl` (final artifact)
+#### `knn_model_test_joris_slim.pkl` (final artifact)
 
 Pickled dict for the API:
 
@@ -153,7 +153,7 @@ python -m ml.artist.scripts.upload_artist
 Custom path:
 
 ```bash
-python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_baseline_model_test.pkl
+python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_model_test_joris_slim.pkl
 ```
 
 Default lookup (no `--path`): `models/<ARTIST_MODEL_LOCAL_FILENAME>`, then `ml/outputs/<ARTIST_MODEL_LOCAL_FILENAME>` (from `.env`).
@@ -189,7 +189,7 @@ gcloud auth application-default login    # use a Google account with access to r
 python -m ml.artist.scripts.upload_artist
 ```
 
-Check the success line ends with your test blob, e.g. `gs://rec-o-models/models/knn_baseline_model_test.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
+Check the success line ends with your model blob, e.g. `gs://rec-o-models/models/knn_model_test_joris_slim.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
 
 Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
 
@@ -258,7 +258,7 @@ python -m ml.release_group.scripts.upload_release_group
 | # | Query | Role | Approx. size |
 |---|--------|------|----------------|
 | 1 | `artist_query` | Artist metadata + tags | **~3.3M rows** |
-| 2 | Extended genres CTE | Release / recording / work tags | Very large (10+ min) |
+| 2 | Extended genres CTE | Release / recording tags | Very large (10+ min) |
 
 Then pandas `groupby`, sklearn fit, `joblib` save. Remote DB adds latency.
 
