@@ -7,14 +7,23 @@ FastAPI service for artist recommendations (KNN) and MusicBrainz search.
 
 ```
 app/
-  main.py       # FastAPI app, routes, auth, rate limits, lifespan (model load at startup)
-  predictor.py  # Load artifact (local or GCS), KNN inference, artist enrichment SQL
-  database.py   # PostgreSQL connection (psycopg)
-  queries.py    # SQL for search endpoints
-  schemas.py    # Pydantic request/response models
+  main.py              # FastAPI routes, auth, lifespan → load_models()
+  models/              # Registry: load_models(), get_models_info()
+    loader.py          # Shared GCS / local path resolution
+  artist/              # Artist KNN inference (only model wired today)
+    config.py          # ARTIST_MODEL_* env vars
+    loader.py          # load_artist_model(), get_artist_model_info()
+    recommender.py     # recommend_artist_ids()
+    enrichment.py      # enrich_artists_from_db() — SQL response enrichment
+  release_group/       # Stub (future album KNN)
+  genre/               # Stub (future genre KNN)
+  predictor.py         # Deprecated re-exports — use app.artist / app.models
+  database.py          # PostgreSQL connection
+  queries.py           # SQL for search endpoints
+  schemas.py           # Pydantic models
 ```
 
-There is **no** training code here (`save_model`, SQL fetch for ML, etc. were moved to `ml/`).
+There is **no** training code here — offline training lives in `ml/artist/`.
 
 ## Run locally
 
@@ -32,7 +41,7 @@ Protected routes need header: `X-API-Key: <TOKEN_API_KEY>` (from `.env`).
 
 ## Model loading
 
-The recommender `.pkl` is loaded **once at startup** via FastAPI **lifespan** (`main.py` → `load_model()` in `predictor.py`). It is **not** baked into the Docker image.
+Recommender artifacts are loaded **at startup** via FastAPI **lifespan** (`main.py` → `load_models()` in `app/models/`). Only **artist** is implemented today. Artifacts are **not** baked into the Docker image.
 
 ### Two sources (`.env`)
 
@@ -108,34 +117,21 @@ On **Cloud Run**, the service account is configured automatically (no `gcloud lo
 curl http://localhost:8000/model
 ```
 
-**Local:**
-
 ```json
 {
-  "loaded": true,
-  "source": "local",
-  "path": "/home/.../rec_o/models/knn_baseline_model_test2.pkl",
-  "filename": "knn_baseline_model_test2.pkl",
-  "gcs_uri": null
+  "artist": {
+    "loaded": true,
+    "source": "gcs",
+    "path": "/tmp/knn_baseline_model_test2.pkl",
+    "filename": "knn_baseline_model_test2.pkl",
+    "gcs_uri": "gs://rec-o-models/models/knn_baseline_model_test2.pkl"
+  },
+  "release_group": { "loaded": false, "source": null, "path": null, "filename": null, "gcs_uri": null },
+  "genre": { "loaded": false, "source": null, "path": null, "filename": null, "gcs_uri": null }
 }
 ```
 
-**GCS:**
-
-```json
-{
-  "loaded": true,
-  "source": "gcs",
-  "path": "/tmp/knn_baseline_model_test2.pkl",
-  "filename": "knn_baseline_model_test2.pkl",
-  "gcs_uri": "gs://rec-o-models/models/knn_baseline_model_test2.pkl"
-}
-```
-
-- `gcs_uri` = source of truth on the cloud  
-- `path` = local file used to `joblib.load` (disk path or temp cache)
-
-If `loaded` is `false`, check logs at startup, blob name, and GCP credentials.
+If `artist.loaded` is `false`, check logs at startup, blob name, and GCP credentials.
 
 ## Docker
 
@@ -152,7 +148,7 @@ With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` in `--env-file`, the contain
 | Method | Path | Auth | Role |
 |--------|------|------|------|
 | GET | `/` | No | Health check |
-| GET | `/model` | No | Loaded model metadata (`source`, `path`, `gcs_uri`) |
+| GET | `/model` | No | Load status per model type (`artist`, `release_group`, `genre`) |
 | POST | `/predict/artist` | Yes | KNN artist recommendations |
 | POST | `/predict/album` | Yes | Mock (not wired to ML yet) |
 | POST | `/search/album` | Yes | Partial album title search |
@@ -161,19 +157,17 @@ With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` in `--env-file`, the contain
 
 `/predict/artist` flow:
 
-1. `predict_playlist()` — KNN on loaded artifact  
-2. `predict_artist()` — fetch names, genres, URLs from PostgreSQL for recommended IDs  
+1. `recommend_artist_ids()` — KNN on loaded artist artifact  
+2. `enrich_artists_from_db()` — fetch names, genres, URLs from PostgreSQL  
 
-## Predictor module (`predictor.py`)
+## Artist module (`app/artist/`)
 
-Responsibilities:
-
-- **`load_model()`** — resolve local path or GCS download, `joblib.load`, set `model_load_info`
-- **`get_model_info()`** — expose load metadata for `GET /model`
-- **`predict_playlist()`** — nearest-neighbor artist IDs from seed artist IDs
-- **`predict_artist()`** — SQL enrichment for the API response (not used for training)
-
-Training, artifact save, and GCS upload are **not** in this file.
+| Function | Role |
+|----------|------|
+| `load_artist_model()` | Local path or GCS download → `joblib.load` |
+| `get_artist_model_info()` | Metadata for `GET /model` → `artist` key |
+| `recommend_artist_ids()` | KNN nearest-neighbor artist IDs |
+| `enrich_artists_from_db()` | SQL enrichment for HTTP response |
 
 ## Related docs
 

@@ -17,7 +17,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.database import fetch_all, get_connection
-from app.predictor import get_model_info, load_model, predict_artist, predict_playlist
+from app.artist import enrich_artists_from_db, recommend_artist_ids
+from app.models import get_models_info, load_models
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
@@ -49,22 +50,23 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the KNN artifact once at startup (local file or GCS), before serving traffic."""
+    """Load recommender artifacts at startup (artist first; others later)."""
     try:
-        if load_model() is None:
+        load_models()
+        artist = get_models_info().get("artist", {})
+        if not artist.get("loaded"):
             logger.warning(
-                "Recommender model not loaded at startup — "
+                "Artist model not loaded at startup — "
                 "set ARTIST_MODEL_LOCAL_PATH or MODEL_BUCKET_NAME + ARTIST_MODEL_BLOB_NAME."
             )
         else:
-            info = get_model_info()
             logger.info(
-                "Recommender model loaded at startup (%s): %s",
-                info.get("source"),
-                info.get("path") or info.get("gcs_uri"),
+                "Artist model loaded at startup (%s): %s",
+                artist.get("source"),
+                artist.get("path") or artist.get("gcs_uri"),
             )
     except RuntimeError as exc:
-        logger.error("Recommender model failed to load at startup: %s", exc)
+        logger.error("Model loading failed at startup: %s", exc)
     yield
 
 
@@ -120,8 +122,8 @@ def read_root(request: Request):
 @app.get("/model")
 @limiter.limit("60/minute")
 def model_status(request: Request):
-    """Which recommender artifact is loaded (local path or GCS URI). No API key required."""
-    return get_model_info()
+    """Load status per model type (artist, release_group, genre). No API key required."""
+    return get_models_info()
 
 
 @app.post("/predict/artist", response_model=PlaylistOutput)
@@ -138,10 +140,10 @@ def predict(
     Requires the X-API-Key header.
     """
     try:
-        artist_ids = predict_playlist(input.ArtistIds, input.TopN)
+        artist_ids = recommend_artist_ids(input.ArtistIds, input.TopN)
 
         with get_connection() as conn:
-            artist_df = predict_artist(artist_ids, conn)
+            artist_df = enrich_artists_from_db(artist_ids, conn)
 
     except RuntimeError as exc:
         raise HTTPException(

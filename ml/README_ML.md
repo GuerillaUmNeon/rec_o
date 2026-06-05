@@ -8,7 +8,7 @@ Offline training lives under `ml/artist/`. The API in [`app/`](../app/README_APP
 
 ```
 ml/
-  artist/                        # artist KNN training only
+  artist/                        # artist KNN training (implemented)
     config.py                    # ARTIST_MODEL_*, MODEL_BUCKET_NAME
     data.py                      # fetch_artist_knn_training_data* + SQL
     features.py                  # artist genre tokens
@@ -18,11 +18,15 @@ ml/
     scripts/
       train_local.py             # train + save local
       upload_artist.py           # upload .pkl to GCS
+  release_group/                 # album KNN training (stub — mirror artist/)
+  genre/                         # genre KNN training (stub — mirror artist/)
   scripts/
     run_local.py                 # deprecated wrapper → artist.scripts.train_local
     upload_to_gcs.py             # deprecated wrapper → artist.scripts.upload_artist
-  outputs/                       # artist_training_features.pkl cache + model copies (gitignored)
+  outputs/                       # training caches + model copies (gitignored)
 ```
+
+When `release_group` and `genre` are added, each subpackage gets the same shape as `artist/` and matching `.env` keys (`RELEASE_GROUP_MODEL_BLOB_NAME`, `GENRE_MODEL_BLOB_NAME`, …). The shared bucket stays `MODEL_BUCKET_NAME`.
 
 Use `train_local` and `upload_artist` separately (no single pipeline script).
 
