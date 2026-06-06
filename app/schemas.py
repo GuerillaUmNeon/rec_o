@@ -25,7 +25,8 @@ class PlaylistOutput(BaseModel):
 
 
 class AlbumSearchInput(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
+    title: str = Field(..., min_length=1, max_length=255, description="Release group title"),
+    artist: str | None = Field(None, description="Artist name")
 
 
 class AlbumSearchOutput(BaseModel):
@@ -59,15 +60,14 @@ class AlbumPredictInput(BaseModel):
     response_length: int = Field(default=10, ge=1, le=50)
     blacklist_release_group_id: list[int] | None = None
 
-
 class AlbumPredictRow(BaseModel):
     gid: UUID
+    url: list[str] = Field(default_factory=list)
     title: str
-    url: list[str]
     genres: list[str]
-    length: int
-    tracks: list[str]
-
+    length: int | None = None
+    tracks: int
+    artist: str
 
 class AlbumPredictOutput(BaseModel):
     albums: list[AlbumPredictRow]

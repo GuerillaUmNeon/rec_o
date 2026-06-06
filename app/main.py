@@ -38,7 +38,7 @@ from app.schemas import (
     PlaylistInput,
     PlaylistOutput,
 )
-
+import pandas as pd
 # Load variables from .env (TOKEN_API_KEY, POSTGRES, etc.)
 load_dotenv()
 
@@ -199,12 +199,12 @@ def predict_album(
 
     albums = [
         AlbumPredictRow(
+            artist=row["artist"],
             gid=row["gid"],
             title=row["title"],
-            url=row["url"],
             genres=row["genres"],
-            length=row["length"],
-            tracks=row["tracks"],
+            length=None if pd.isna(row["length"]) else int(row["length"]),
+            tracks=None if pd.isna(row["tracks"]) else int(row["tracks"])
         )
         for row in albums_df.to_dict(orient="records")
     ]
