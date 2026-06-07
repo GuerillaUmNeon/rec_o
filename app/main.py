@@ -16,7 +16,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.artist.enrichment import get_top_artists, get_top_albums
+from app.artist.enrichment import get_top_lb
 from app.database import fetch_all, get_connection
 from app.artist import enrich_artists_from_db, recommend_artist_ids
 from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
@@ -292,7 +292,7 @@ def lb_artist_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    artists = get_top_artists(input.username, input.range, input.min_listen)
+    artists = get_top_lb(input.username, input.range, input.min_listen, "artists")
     artist_mbids = [artist["artist_mbid"] for artist in artists]
 
     rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (artist_mbids,))
@@ -300,10 +300,11 @@ def lb_artist_predict(
 
     blacklist_ids = []
     if input.blacklist != "None":
-        blacklist = get_top_artists(
+        blacklist = get_top_lb(
             input.username,
             input.blacklist,
-            input.blacklist_min
+            input.blacklist_min,
+            "artists"
         )
         blacklist_mbids = [artist["artist_mbid"] for artist in blacklist]
         blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (blacklist_mbids,))
@@ -335,18 +336,19 @@ def lb_album_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    releases = get_top_albums(input.username, input.range, input.min_listen)
+    releases = get_top_lb(input.username, input.range, input.min_listen, "releases")
     release_mbids = [release["release_mbid"] for release in releases]
 
     rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (release_mbids,))
     releases_group_ids = [row[0] for row in rows]
 
     blacklist_ids = []
-    if input.blacklist != "None":
-        blacklist = get_top_albums(
+    if input.blacklist != None:
+        blacklist = get_top_lb(
             input.username,
             input.blacklist,
-            input.blacklist_min
+            input.blacklist_min,
+            "releases"
         )
         blacklist_mbids = [release["release_mbid"] for release in blacklist]
         blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (blacklist_mbids,))
