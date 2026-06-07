@@ -2,6 +2,7 @@
 import os
 import pandas as pd
 import requests
+from fastapi import HTTPException
 
 LISTENBRAINZ=f"{os.getenv("LISTENBRAINZ_URL")}/1/stats/user"
 
@@ -81,32 +82,45 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
 
     return grouped
 
-def get_top_artists(username, range, min_listen):
-    url = f"{LISTENBRAINZ}/{username}/artists"
+def get_top_lb(username, range, min_listen, type):
+    url = f"{LISTENBRAINZ}/{username}/{type}"
     params = {
         'range': range,
-        # 'count': count
     }
 
-    response = requests.get(url, params=params)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"ListenBrainz API error: {response.text}"
+        ) from e
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ListenBrainz request failed: {str(e)}"
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="ListenBrainz returned invalid JSON"
+        ) from e
 
-    data = response.json()
-    artists = data['payload']['artists']
+    results = data.get("payload", {}).get(type)
+    if results is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ListenBrainz response missing payload.{type}"
+        )
 
-    return [artist for artist in artists if artist['listen_count'] > min_listen]
+    filtered = [result for result in results if result["listen_count"] > min_listen]
 
-def get_top_albums(username, range, min_listen):
-    url = f"{LISTENBRAINZ}/{username}/releases"
-    params = {
-        'range': range,
-        # 'count': count
-    }
+    if not filtered:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No albums found for user '{username}' with listen_count > {min_listen}"
+        )
 
-    response = requests.get(url, params=params)
-    response.raise_for_status()
-
-    data = response.json()
-    releases = data['payload']['releases']
-
-    return [release for release in releases if release['listen_count'] > min_listen]
+    return filtered
