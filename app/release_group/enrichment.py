@@ -1,6 +1,9 @@
 """PostgreSQL enrichment for release group recommendation responses."""
 
 import pandas as pd
+import requests
+from app.schemas import AlbumPredictOutput
+import random
 
 RELEASE_GROUP_RESPONSE_INFOS = """
             WITH release_groups_filter AS (SELECT unnest(%s::int[]) AS release_group_id),
@@ -147,3 +150,68 @@ def enrich_release_groups_from_db(
     result = result.sort_values("_order").drop(columns="_order")
 
     return result[["id", "gid", "title", "artist", "genres", "length", "tracks"]]
+
+def format_tracks(tracks: int | None) -> str:
+    if tracks is None:
+        return ""
+    return f"{tracks} track" if tracks == 1 else f"{tracks} tracks"
+
+def format_duration_ms(length_ms: int | None) -> str:
+    if length_ms is None:
+        return ""
+
+    total_minutes = length_ms // 1000 // 60
+    hours, minutes = divmod(total_minutes, 60)
+
+    if hours >= 1:
+        if minutes > 0:
+            return f"{hours}h {minutes} min"
+        return f"{hours}h"
+
+    return f"{total_minutes} min"
+
+def send_ntfy_album_notification(input, album_output: AlbumPredictOutput):
+    if not input.ntfy_url or not input.ntfy_topic:
+        return
+
+    blocks = ["# Recommended release groups"]
+
+    for album in album_output.albums:
+        links = [f"[ListenBrainz](https://listenbrainz.org/release-group/{album.gid})"]
+
+        if album.url:
+            links.append(f"[Link]({album.url[0]})")
+
+        random_genres = (
+            ", ".join(random.sample(album.genres, min(5, len(album.genres))))
+            if album.genres else ""
+        )
+
+        block = [
+            f"**{album.title}** - {album.artist}",
+            random_genres,
+            " - ".join(
+                part for part in [
+                    format_tracks(album.tracks),
+                    format_duration_ms(album.length)
+                ] if part
+            ),
+            " | ".join(links)
+        ]
+
+        blocks.append("\n".join(block))
+
+    message = "\n\n".join(blocks)
+
+    publish_url = f"{input.ntfy_url.rstrip('/')}/{input.ntfy_topic}"
+    response = requests.post(
+        publish_url,
+        data=message.encode("utf-8"),
+        headers={
+            "Title": "rec_o release groups",
+            "Markdown": "yes",
+            "Tags": "cd"
+        },
+        timeout=10,
+    )
+    response.raise_for_status()

@@ -4,6 +4,8 @@ import pandas as pd
 import requests
 from fastapi import HTTPException
 
+from app.schemas import PlaylistOutput
+
 LISTENBRAINZ=f"{os.getenv("LISTENBRAINZ_URL")}/1/stats/user"
 
 def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
@@ -124,3 +126,43 @@ def get_top_lb(username, range, min_listen, type):
         )
 
     return filtered
+
+def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
+    if not input.ntfy_url or not input.ntfy_topic:
+        return
+
+    lines = ["# Recommended artists", ""]
+
+    for artist in artist_output.artists:
+        genre_text = ", ".join(artist.genre) if artist.genre else ""
+
+        line = f"- **{artist.name}**"
+        if genre_text:
+            line += f" ({genre_text})"
+
+        links = [f"[ListenBrainz](https://listenbrainz.org/artist/{artist.gid})"]
+
+        official_site = next(
+            (str(url.url) for url in artist.urls if getattr(url, "type", None) == 183),
+            None
+        )
+        if official_site:
+            links.append(f"[Official site]({official_site})")
+
+        line += " — " + " | ".join(links)
+        lines.append(line)
+
+    message = "\n".join(lines)
+
+    publish_url = f"{input.ntfy_url.rstrip('/')}/{input.ntfy_topic}"
+    response = requests.post(
+        publish_url,
+        data=message.encode("utf-8"),
+        headers={
+            "Title": "rec_o recommendation",
+            "Markdown": "yes",
+            "Tags": "musical_note"
+        },
+        timeout=10,
+    )
+    response.raise_for_status()

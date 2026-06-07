@@ -16,7 +16,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.artist.enrichment import get_top_lb
+from app.artist.enrichment import get_top_lb, send_ntfy_artist_notification
 from app.database import fetch_all, get_connection
 from app.artist import enrich_artists_from_db, recommend_artist_ids
 from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
@@ -26,6 +26,7 @@ from app.queries import (
     ARTIST_SEARCH_QUERY,
     GENRE_SEARCH_QUERY, ARTIST_GID_SEARCH_QUERY, ALBUM_GID_SEARCH_QUERY,
 )
+from app.release_group.enrichment import send_ntfy_album_notification
 from app.schemas import (
     AlbumSearchInput,
     AlbumSearchOutput,
@@ -326,9 +327,12 @@ def lb_artist_predict(
             detail=str(exc),
         ) from exc
 
-    artist_df = artist_df[["gid", "name", "genre", "urls"]]
+    artist_records = artist_df[["gid", "name", "genre", "urls"]].to_dict(orient="records")
 
-    return ({"artists": artist_df.to_dict(orient="records")})
+    artist_output = PlaylistOutput(artists=artist_records)
+    send_ntfy_artist_notification(input, artist_output)
+
+    return ({"artists": artist_records})
 
 @app.post("/listenbrainz/album", response_model=AlbumPredictOutput)
 def lb_album_predict(
@@ -374,12 +378,18 @@ def lb_album_predict(
         AlbumPredictRow(
             artist=row["artist"],
             gid=row["gid"],
+            url=row["url"] if isinstance(row.get("url"), list) else [],
             title=row["title"],
-            genres=row["genres"],
+            genres=row["genres"] if isinstance(row.get("genres"), list) else [],
             length=None if pd.isna(row["length"]) else int(row["length"]),
             tracks=None if pd.isna(row["tracks"]) else int(row["tracks"])
         )
         for row in release_groups_df.to_dict(orient="records")
     ]
 
-    return AlbumPredictOutput(albums=release_groups)
+    album_output = AlbumPredictOutput(albums=release_groups)
+
+    if input.ntfy_url and input.ntfy_topic:
+        send_ntfy_album_notification(input, album_output)
+
+    return album_output
