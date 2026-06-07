@@ -16,7 +16,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from app.artist.enrichment import get_top_artists
+from app.artist.enrichment import get_top_artists, get_top_albums
 from app.database import fetch_all, get_connection
 from app.artist import enrich_artists_from_db, recommend_artist_ids
 from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
@@ -24,7 +24,7 @@ from app.models import get_models_info, load_models
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
-    GENRE_SEARCH_QUERY, ARTIST_GID_SEARCH_QUERY,
+    GENRE_SEARCH_QUERY, ARTIST_GID_SEARCH_QUERY, ALBUM_GID_SEARCH_QUERY,
 )
 from app.schemas import (
     AlbumSearchInput,
@@ -232,7 +232,8 @@ def search_album(
         AlbumSearchOutput(
             release_group_id=row[0],
             title=row[1],
-            artist=row[2]
+            artist=row[2],
+            disambiguation=row[3]
         )
         for row in rows
     ]
@@ -326,4 +327,57 @@ def lb_artist_predict(
 
     artist_df = artist_df[["gid", "name", "genre", "urls"]]
 
-    return {"artists": artist_df.to_dict(orient="records")}
+    return ({"artists": artist_df.to_dict(orient="records")})
+
+@app.post("/listenbrainz/album", response_model=AlbumPredictOutput)
+def lb_album_predict(
+    request: Request,
+    input: ListenbrainzInput,
+    _: str = Depends(verify_api_key),
+):
+    releases = get_top_albums(input.username, input.range, input.min_listen)
+    release_mbids = [release["release_mbid"] for release in releases]
+
+    rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (release_mbids,))
+    releases_group_ids = [row[0] for row in rows]
+
+    blacklist_ids = []
+    if input.blacklist != "None":
+        blacklist = get_top_albums(
+            input.username,
+            input.blacklist,
+            input.blacklist_min
+        )
+        blacklist_mbids = [release["release_mbid"] for release in blacklist]
+        blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (blacklist_mbids,))
+        blacklist_ids = [row[0] for row in blacklist_rows]
+
+    try:
+        predict_release_group_ids = recommend_release_group_ids(
+            releases_group_ids,
+            input.max_results,
+            blacklist=blacklist_ids,
+        )
+
+        with get_connection() as conn:
+            release_groups_df = enrich_release_groups_from_db(predict_release_group_ids, conn)
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    release_groups = [
+        AlbumPredictRow(
+            artist=row["artist"],
+            gid=row["gid"],
+            title=row["title"],
+            genres=row["genres"],
+            length=None if pd.isna(row["length"]) else int(row["length"]),
+            tracks=None if pd.isna(row["tracks"]) else int(row["tracks"])
+        )
+        for row in release_groups_df.to_dict(orient="records")
+    ]
+
+    return AlbumPredictOutput(albums=release_groups)

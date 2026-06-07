@@ -33,6 +33,7 @@ class AlbumSearchOutput(BaseModel):
     release_group_id: int
     title: str
     artist: str
+    disambiguation: str | None = None
 
 
 class ArtistSearchInput(BaseModel):
