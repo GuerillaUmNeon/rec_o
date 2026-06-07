@@ -38,3 +38,9 @@ FROM musicbrainz.genre
 WHERE name ILIKE %s
 LIMIT 20;
 """
+
+ARTIST_GID_SEARCH_QUERY = """
+SELECT id, gid
+FROM musicbrainz.artist
+WHERE gid = ANY (%s::uuid[]);
+"""

@@ -16,6 +16,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from app.artist.enrichment import get_top_artists
 from app.database import fetch_all, get_connection
 from app.artist import enrich_artists_from_db, recommend_artist_ids
 from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
@@ -23,7 +24,7 @@ from app.models import get_models_info, load_models
 from app.queries import (
     ALBUM_SEARCH_QUERY,
     ARTIST_SEARCH_QUERY,
-    GENRE_SEARCH_QUERY,
+    GENRE_SEARCH_QUERY, ARTIST_GID_SEARCH_QUERY,
 )
 from app.schemas import (
     AlbumSearchInput,
@@ -36,9 +37,10 @@ from app.schemas import (
     GenreSearchInput,
     GenreSearchOutput,
     PlaylistInput,
-    PlaylistOutput,
+    PlaylistOutput, ListenbrainzInput,
 )
 import pandas as pd
+
 # Load variables from .env (TOKEN_API_KEY, POSTGRES, etc.)
 load_dotenv()
 
@@ -282,3 +284,46 @@ def search_genre(
         )
         for row in rows
     ]
+
+@app.post("/listenbrainz/artist", response_model=PlaylistOutput)
+def lb_artist_predict(
+    request: Request,
+    input: ListenbrainzInput,
+    _: str = Depends(verify_api_key),
+):
+    artists = get_top_artists(input.username, input.range, input.min_listen)
+    artist_mbids = [artist["artist_mbid"] for artist in artists]
+
+    rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (artist_mbids,))
+    artist_ids = [row[0] for row in rows]
+
+    blacklist_ids = []
+    if input.blacklist != "None":
+        blacklist = get_top_artists(
+            input.username,
+            input.blacklist,
+            input.blacklist_min
+        )
+        blacklist_mbids = [artist["artist_mbid"] for artist in blacklist]
+        blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (blacklist_mbids,))
+        blacklist_ids = [row[0] for row in blacklist_rows]
+
+    try:
+        predict_artist_ids = recommend_artist_ids(
+            artist_ids,
+            input.max_results,
+            blacklist_artist_ids=blacklist_ids,
+        )
+
+        with get_connection() as conn:
+            artist_df = enrich_artists_from_db(predict_artist_ids, conn)
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    artist_df = artist_df[["gid", "name", "genre", "urls"]]
+
+    return {"artists": artist_df.to_dict(orient="records")}

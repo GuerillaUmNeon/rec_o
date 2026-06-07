@@ -1,6 +1,7 @@
 """PostgreSQL enrichment for artist recommendation responses."""
 
 import pandas as pd
+import requests
 
 
 def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
@@ -78,3 +79,18 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
     )
 
     return grouped
+
+def get_top_artists(username, range, min_listen):
+    url = f"https://api.listenbrainz.org/1/stats/user/{username}/artists"
+    params = {
+        'range': range,
+        # 'count': count
+    }
+
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+
+    data = response.json()
+    artists = data['payload']['artists']
+
+    return [artist for artist in artists if artist['listen_count'] > min_listen]
