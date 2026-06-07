@@ -67,7 +67,7 @@ class AlbumPredictRow(BaseModel):
     title: str
     genres: list[str]
     length: int | None = None
-    tracks: int
+    tracks: int | None = None
     artist: str
 
 class AlbumPredictOutput(BaseModel):
