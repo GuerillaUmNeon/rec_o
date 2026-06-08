@@ -27,7 +27,7 @@ steps:
       - --region=europe-west1
       - --allow-unauthenticated
       - --port=8000
-      - --memory=4Gi
+      - --memory=8Gi
       - --cpu=2
       - --vpc-connector=rec-o-connector
       - --vpc-egress=all-traffic
