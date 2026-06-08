@@ -1,7 +1,12 @@
 """PostgreSQL enrichment for artist recommendation responses."""
-
+import os
 import pandas as pd
+import requests
+from fastapi import HTTPException
 
+from app.schemas import PlaylistOutput
+
+LISTENBRAINZ=f"{os.getenv("LISTENBRAINZ_URL")}/1/stats/user"
 
 def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
     """
@@ -78,3 +83,86 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
     )
 
     return grouped
+
+def get_top_lb(username, range, min_listen, type):
+    url = f"{LISTENBRAINZ}/{username}/{type}"
+    params = {
+        'range': range,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"ListenBrainz API error: {response.text}"
+        ) from e
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ListenBrainz request failed: {str(e)}"
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="ListenBrainz returned invalid JSON"
+        ) from e
+
+    results = data.get("payload", {}).get(type)
+    if results is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ListenBrainz response missing payload.{type}"
+        )
+
+    filtered = [result for result in results if result["listen_count"] > min_listen]
+
+    if not filtered:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No albums found for user '{username}' with listen_count > {min_listen}"
+        )
+
+    return filtered
+
+def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
+    if not input.ntfy_url or not input.ntfy_topic:
+        return
+
+    lines = ["# Recommended artists", ""]
+
+    for artist in artist_output.artists:
+        genre_text = ", ".join(artist.genre) if artist.genre else ""
+
+        line = f"- **{artist.name}**"
+        if genre_text:
+            line += f" ({genre_text})"
+
+        links = [f"[ListenBrainz](https://listenbrainz.org/artist/{artist.gid})"]
+
+        official_site = next(
+            (str(url.url) for url in artist.urls if getattr(url, "type", None) == 183),
+            None
+        )
+        if official_site:
+            links.append(f"[Official site]({official_site})")
+
+        line += " — " + " | ".join(links)
+        lines.append(line)
+
+    message = "\n".join(lines)
+
+    publish_url = f"{input.ntfy_url.rstrip('/')}/{input.ntfy_topic}"
+    response = requests.post(
+        publish_url,
+        data=message.encode("utf-8"),
+        headers={
+            "Title": "rec_o recommendation",
+            "Markdown": "yes",
+            "Tags": "musical_note"
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
