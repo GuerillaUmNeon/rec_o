@@ -168,6 +168,62 @@ docker run --name rec-o-api -p 8000:8000 --env-file .env rec-o
 The image contains `app/` + a **minimal** `ml/release_group/features.py` stub (so `joblib` can unpickle trained artifacts) + Python deps. No `models/`, no full `ml/` training code, no `.pkl` baked in.  
 With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_NAME` in `--env-file`, the container downloads from GCS at startup (needs valid credentials in the environment or a service account on Cloud Run).
 
+## Test `cloudbuild.yaml` (deploy prod)
+
+Run the full pipeline locally (same as the GitHub trigger on `main`): build image → push → deploy `rec-o-api`.
+
+```bash
+gcloud config set project rec-o-gcp
+gcloud builds submit --config=cloudbuild.yaml --region=europe-west1 .
+```
+
+Use **`--region=europe-west1`** so manual runs match the GitHub trigger on `main` (without it, Cloud Build defaults to **global**).
+
+Image tags use `$BUILD_ID` (always set by Cloud Build). Manual `gcloud builds submit` used to fail with empty `$COMMIT_SHA` (`rec-o:` invalid tag).
+
+**Stream logs** (use the build ID printed by the command above):
+
+```bash
+gcloud builds log <BUILD_ID> --stream
+```
+
+Or open **Cloud Build → History** in the GCP console.
+
+There is no dry-run: this **really deploys** to Cloud Run `rec-o-api`.
+
+**Prerequisites:** your user or Cloud Build service account needs **Cloud Build**, **Artifact Registry**, **Cloud Run Admin**, and **Secret Accessor** on every secret referenced in `cloudbuild.yaml`.
+
+### Deploy step only (image already built)
+
+To validate the `gcloud run deploy` flags without rebuilding:
+
+```bash
+gcloud run deploy rec-o-api \
+  --region=europe-west1 \
+  --image=europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:<existing-tag> \
+  --allow-unauthenticated \
+  --port=8000 \
+  --memory=8Gi \
+  --cpu=2 \
+  --vpc-connector=rec-o-connector \
+  --vpc-egress=all-traffic \
+  --set-secrets=TOKEN_API_KEY=TOKEN_API_KEY:latest,POSTGRES=POSTGRES:latest,DATABASE=DATABASE:latest,DB_USERNAME=DB_USERNAME:latest,DB_PASSWORD=DB_PASSWORD:latest,DB_PORT=DB_PORT:latest,DATABASE_URL=DATABASE_URL:latest,MODEL_BUCKET_NAME=MODEL_BUCKET_NAME:latest,ARTIST_MODEL_BLOB_NAME=ARTIST_MODEL_BLOB_NAME:latest,RELEASE_GROUP_MODEL_BLOB_NAME=RELEASE_GROUP_MODEL_BLOB_NAME:latest \
+  --update-env-vars=LISTENBRAINZ_URL=https://api.listenbrainz.org
+```
+
+Note: `--remove-env-vars` and `--set-env-vars` / `--update-env-vars` cannot be used in the same `gcloud run deploy` command — use `--update-env-vars` to add non-secret vars alongside `--set-secrets`.
+
+### After deploy
+
+```bash
+gcloud run services describe rec-o-api --region=europe-west1 --format='value(status.url)'
+curl https://<url>/model
+```
+
+Full dataset models need **8 GiB** memory on Cloud Run (`--memory=8Gi` in `cloudbuild.yaml`).
+
+See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md) for trigger setup and staging (`cloudbuild-staging.yaml` → `rec-o-api-staging`).
+
 ## Endpoints
 
 | Method | Path | Auth | Role |
