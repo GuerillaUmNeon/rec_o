@@ -1,5 +1,7 @@
 # Build/push: no secrets in the image (layers would leak them).
 # Deploy: Cloud Run mounts Secret Manager values as env vars at container startup.
+# Manual test: gcloud builds submit --config=cloudbuild.yaml --region=europe-west1 .
+# (GitHub trigger on main is already configured for europe-west1 — not global.)
 options:
   logging: CLOUD_LOGGING_ONLY
 
@@ -9,13 +11,13 @@ steps:
     args:
       - build
       - -t
-      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$BUILD_ID
       - .
 
   - name: gcr.io/cloud-builders/docker
     args:
       - push
-      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+      - europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$BUILD_ID
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -23,7 +25,7 @@ steps:
       - run
       - deploy
       - rec-o-api
-      - --image=europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$COMMIT_SHA
+      - --image=europe-west1-docker.pkg.dev/rec-o-gcp/rec-o/rec-o:$BUILD_ID
       - --region=europe-west1
       - --allow-unauthenticated
       - --port=8000
