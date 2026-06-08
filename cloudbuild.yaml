@@ -27,6 +27,8 @@ steps:
       - --region=europe-west1
       - --allow-unauthenticated
       - --port=8000
+      - --memory=4Gi
+      - --cpu=2
       - --vpc-connector=rec-o-connector
       - --vpc-egress=all-traffic
       # One-time migration: Cloud Run cannot switch a var from literal env → secret in one step.
