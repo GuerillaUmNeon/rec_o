@@ -1,6 +1,60 @@
 """Artist KNN recommendations from a loaded artifact."""
 
+from app.database import get_connection
 from app.artist.loader import get_artist_model, load_artist_model
+
+
+def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
+    """
+    Keep only artists that are recommendable as primary music artists.
+
+    MusicBrainz stores people like engineers, photographers, designers, and
+    managers in the artist table. For recommendation output, keep only
+    Person/Group entities that are credited as primary artists on a release
+    group or release, preserving the KNN order.
+    """
+    if not candidate_ids:
+        return []
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH candidate_ids(id, ord) AS (
+                    SELECT *
+                    FROM unnest(%s::int[]) WITH ORDINALITY
+                ),
+                primary_artists AS (
+                    SELECT DISTINCT acn.artist AS id
+                    FROM release_group rg
+                    JOIN artist_credit_name acn
+                        ON acn.artist_credit = rg.artist_credit
+                    JOIN candidate_ids
+                        ON candidate_ids.id = acn.artist
+
+                    UNION
+
+                    SELECT DISTINCT acn.artist AS id
+                    FROM release r
+                    JOIN artist_credit_name acn
+                        ON acn.artist_credit = r.artist_credit
+                    JOIN candidate_ids
+                        ON candidate_ids.id = acn.artist
+                )
+                SELECT candidate_ids.id
+                FROM candidate_ids
+                JOIN primary_artists
+                    ON primary_artists.id = candidate_ids.id
+                JOIN artist
+                    ON artist.id = candidate_ids.id
+                JOIN artist_type
+                    ON artist_type.id = artist.type
+                WHERE artist_type.name IN ('Person', 'Group')
+                ORDER BY candidate_ids.ord
+                """,
+                (candidate_ids,),
+            )
+            return [int(row[0]) for row in cur.fetchall()]
 
 
 def _recommend_artist_ids_from_artifact(
@@ -97,15 +151,29 @@ def recommend_artist_ids(
         )
 
     if isinstance(model, dict):
-        recommendations = _recommend_artist_ids_from_artifact(
+        data = model.get("data")
+        if data is None:
+            data = model.get("df_clean")
+        if data is None:
+            raise RuntimeError(
+                "Artist artifact must contain df_clean as 'data'. "
+                "Save {'vectorizer': vectorizer, 'model': knn_model, 'data': df_clean}."
+            )
+
+        candidate_count = min(
+            len(data),
+            max(top_n * 80, top_n + len(blacklist_artist_ids or []) + 200, 800),
+        )
+        candidates = _recommend_artist_ids_from_artifact(
             model,
             artist_ids,
-            top_n,
+            candidate_count,
             blacklist_artist_ids=blacklist_artist_ids,
         )
+        recommendations = _filter_recommendable_artist_ids(candidates)[:top_n]
         if len(recommendations) < top_n:
             raise RuntimeError(
-                "Pas assez de recommandations disponibles après application de la blacklist."
+                "Pas assez de recommandations disponibles après application des filtres."
             )
         return recommendations
 
