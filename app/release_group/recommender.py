@@ -111,6 +111,9 @@ def recommend_release_group_ids(
         blacklist=blacklist,
         genre_ids=genre_ids,
     )
+
+    recommendations = [x for x in recommendations if x not in blacklist]
+
     if not recommendations:
         raise RuntimeError("No recommendation found for these release group IDs.")
     return recommendations

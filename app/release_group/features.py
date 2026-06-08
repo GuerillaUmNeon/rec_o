@@ -17,10 +17,12 @@ class ListToSparseTransformer(BaseEstimator, TransformerMixin):
         self.categorical_cols = categorical_cols
         self.numeric_mean_cols = numeric_mean_cols
         self.list_cols = list_cols
-        self.imputers: dict = {}
-        self.mlbs: dict = {}
+
+        self.imputers = {}
+        self.mlbs = {}
 
     def fit(self, X, y=None):
+        # Fit imputers
         if self.categorical_cols:
             self.imputers["categorical"] = SimpleImputer(strategy="most_frequent")
             self.imputers["categorical"].fit(X[self.categorical_cols])
@@ -31,7 +33,8 @@ class ListToSparseTransformer(BaseEstimator, TransformerMixin):
 
         for col in self.list_cols:
             self.mlbs[col] = MultiLabelBinarizer(sparse_output=True)
-            self.mlbs[col].fit(X[col].apply(self._ensure_list))
+            X_list = X[col].apply(self._ensure_list)
+            self.mlbs[col].fit(X_list)
 
         return self
 
@@ -39,24 +42,23 @@ class ListToSparseTransformer(BaseEstimator, TransformerMixin):
         X = X.copy()
 
         if self.categorical_cols:
-            X[self.categorical_cols] = self.imputers["categorical"].transform(
-                X[self.categorical_cols]
-            )
+            X[self.categorical_cols] = self.imputers["categorical"].transform(X[self.categorical_cols])
 
         if self.numeric_mean_cols:
-            X[self.numeric_mean_cols] = self.imputers["numeric"].transform(
-                X[self.numeric_mean_cols]
-            )
+            X[self.numeric_mean_cols] = self.imputers["numeric"].transform(X[self.numeric_mean_cols])
 
         X_scalar = X[self.categorical_cols + self.numeric_mean_cols].to_numpy(dtype=np.float32)
 
         list_feature_matrices = []
         for col in self.list_cols:
-            X_col = self.mlbs[col].transform(X[col].apply(self._ensure_list))
+            X_list = X[col].apply(self._ensure_list)
+            X_col = self.mlbs[col].transform(X_list)
             list_feature_matrices.append(X_col)
 
         matrices = [sparse.csr_matrix(X_scalar)] + list_feature_matrices
-        return sparse.hstack(matrices, format="csr")
+        X_final = sparse.hstack(matrices, format="csr")
+
+        return X_final
 
     @staticmethod
     def _ensure_list(x):

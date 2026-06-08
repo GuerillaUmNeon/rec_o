@@ -8,7 +8,8 @@ ALBUM_SEARCH_QUERY = """
 SELECT
     rg.id AS release_group_id,
     rg.name AS title,
-    a.name AS artist
+    a.name AS artist,
+    rg.comment AS disambiguation
 FROM musicbrainz.release_group rg
 JOIN musicbrainz.artist_credit ac
     ON rg.artist_credit = ac.id
@@ -37,4 +38,16 @@ SELECT
 FROM musicbrainz.genre
 WHERE name ILIKE %s
 LIMIT 20;
+"""
+
+ARTIST_GID_SEARCH_QUERY = """
+SELECT id, gid
+FROM musicbrainz.artist
+WHERE gid = ANY (%s::uuid[]);
+"""
+
+ALBUM_GID_SEARCH_QUERY = """
+SELECT release_group AS id
+FROM musicbrainz.release
+WHERE gid = ANY (%s::uuid[]);
 """
