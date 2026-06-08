@@ -293,7 +293,7 @@ def lb_artist_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    artists = get_top_lb(input.username, input.range, input.min_listen, "artists")
+    artists = get_top_lb(input.username, input.range, input.min_listen, "artists", input.token)
     artist_mbids = [artist["artist_mbid"] for artist in artists]
 
     rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (artist_mbids,))
@@ -305,7 +305,8 @@ def lb_artist_predict(
             input.username,
             input.blacklist,
             input.blacklist_min,
-            "artists"
+            "artists",
+            input.token
         )
         blacklist_mbids = [artist["artist_mbid"] for artist in blacklist]
         blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (blacklist_mbids,))
@@ -340,7 +341,7 @@ def lb_album_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    releases = get_top_lb(input.username, input.range, input.min_listen, "releases")
+    releases = get_top_lb(input.username, input.range, input.min_listen, "releases", input.token)
     release_mbids = [release["release_mbid"] for release in releases]
 
     rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (release_mbids,))
@@ -352,7 +353,8 @@ def lb_album_predict(
             input.username,
             input.blacklist,
             input.blacklist_min,
-            "releases"
+            "releases",
+            input.token
         )
         blacklist_mbids = [release["release_mbid"] for release in blacklist]
         blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (blacklist_mbids,))

@@ -82,3 +82,4 @@ class ListenbrainzInput(BaseModel):
     max_results: int = Field(default=10, ge=1, le=100)
     ntfy_url: str | None = None
     ntfy_topic: str | None = None
+    token: str | None = None

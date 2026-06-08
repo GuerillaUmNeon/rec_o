@@ -84,14 +84,17 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
 
     return grouped
 
-def get_top_lb(username, range, min_listen, type):
+def get_top_lb(username, range, min_listen, type, token):
     url = f"{LISTENBRAINZ}/{username}/{type}"
     params = {
-        'range': range,
+        "range": range,
+    }
+    auth_header = {
+        "Authorization": f"Token {token}"
     }
 
     try:
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, headers=auth_header, timeout=10)
         response.raise_for_status()
         data = response.json()
     except requests.exceptions.HTTPError as e:
@@ -122,7 +125,7 @@ def get_top_lb(username, range, min_listen, type):
     if not filtered:
         raise HTTPException(
             status_code=404,
-            detail=f"No albums found for user '{username}' with listen_count > {min_listen}"
+            detail=f"No results found for user '{username}' with listen_count > {min_listen}"
         )
 
     return filtered
