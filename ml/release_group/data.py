@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from gcld3 import NNetLanguageIdentifier
 
 from ml.release_group.config import (
     LENGTH_MS_FOR_ALBUM,
@@ -247,6 +248,60 @@ WITH artist_tag_links AS (
         ON gb.release_group = t.release_group_id;
 """
 
+NULL_LANGUAGE_QUERY = """
+      SELECT rg.id                          AS release_group_id, \
+             COALESCE(rg.name, rg.id::text) AS release_group_title, \
+             t.name                         AS track_title
+      FROM release_group rg
+               LEFT JOIN release r ON r.release_group = rg.id
+               LEFT JOIN medium m ON m.release = r.id
+               LEFT JOIN track t ON t.medium = m.id
+      WHERE rg.id = ANY (%s) \
+      """
+
+LANG_ID_MAP = {
+    "af": "9", "am": "15", "ar": "18", "bg": "62", "bg-Latn": "62", "bn": "47",
+    "bs": "56", "ca": "68", "ceb": "68", "co": "89", "cs": "98", "cy": "455",
+    "da": "100", "de": "145", "el": "159", "el-Latn": "159", "en": "120",
+    "eo": "122", "es": "393", "et": "123", "eu": "41", "fa": "334", "fi": "131",
+    "fil": "189", "fr": "134", "fy": "137", "ga": "149", "gd": "148", "gl": "150",
+    "gu": "161", "ha": "165", "haw": "165", "he": "167", "hi": "171", "hi-Latn": "171",
+    "hmn": "179", "hr": "366", "ht": "164", "hu": "176", "hy": "21", "id": "189",
+    "ig": "179", "is": "180", "it": "195", "iw": "167", "ja": "198", "ja-Latn": "198",
+    "jv": "196", "ka": "144", "kk": "211", "km": "215", "kn": "206", "ko": "224",
+    "ku": "232", "ky": "219", "la": "238", "lb": "246", "lo": "237", "lt": "243",
+    "lv": "239", "mg": "275", "mi": "262", "mk": "254", "ml": "260", "mn": "282",
+    "mr": "264", "ms": "266", "mt": "276", "my": "63", "ne": "300", "nl": "113",
+    "no": "309", "ny": "313", "pa": "330", "pl": "338", "ps": "343", "pt": "340",
+    "ro": "351", "ru": "353", "ru-Latn": "353", "sd": "387", "si": "373", "sk": "377",
+    "sl": "378", "sm": "384", "sn": "386", "so": "390", "sq": "12", "sr": "363",
+    "st": "392", "su": "399", "sv": "403", "sw": "402", "ta": "407", "te": "409",
+    "tg": "413", "th": "415", "tr": "433", "uk": "441", "ur": "444", "uz": "445",
+    "vi": "448", "xh": "460", "yi": "463", "yo": "464", "zh": "76", "zh-Latn": "76",
+    "zu": "470"
+}
+
+SCRIPT_ID_MAP = {
+    "af": "28", "am": "86", "ar": "18", "bg": "31", "bg-Latn": "28", "bn": "53",
+    "bs": "28", "ca": "28", "ceb": "28", "co": "28", "cs": "28", "cy": "28",
+    "da": "28", "de": "28", "el": "22", "el-Latn": "28", "en": "28", "eo": "28",
+    "es": "28", "et": "28", "eu": "28", "fa": "18", "fi": "28", "fil": "28",
+    "fr": "28", "fy": "28", "ga": "28", "gd": "28", "gl": "28", "gu": "52",
+    "ha": "28", "haw": "28", "he": "11", "hi": "50", "hi-Latn": "28", "hmn": "28",
+    "hr": "28", "ht": "28", "hu": "28", "hy": "35", "id": "28", "ig": "28",
+    "is": "28", "it": "28", "iw": "11", "ja": "85", "ja-Latn": "28", "jv": "28",
+    "ka": "36", "kk": "31", "km": "68", "kn": "60", "ko": "43", "ku": "28",
+    "ky": "31", "la": "28", "lb": "28", "lo": "69", "lt": "28", "lv": "28",
+    "mg": "28", "mi": "28", "mk": "31", "ml": "62", "mn": "31", "mr": "50",
+    "ms": "28", "mt": "28", "my": "64", "ne": "50", "nl": "28", "no": "28",
+    "ny": "28", "pa": "49", "pl": "28", "ps": "18", "pt": "28", "ro": "28",
+    "ru": "31", "ru-Latn": "28", "sd": "18", "si": "63", "sk": "28", "sl": "28",
+    "sm": "28", "sn": "28", "so": "28", "sq": "28", "sr": "31", "st": "28",
+    "su": "107", "sv": "28", "sw": "28", "ta": "61", "te": "59", "tg": "31",
+    "th": "65", "tr": "28", "uk": "31", "ur": "18", "uz": "28", "vi": "28",
+    "xh": "28", "yi": "11", "yo": "28", "zh": "92", "zh-Latn": "28", "zu": "28"
+}
+
 def _resolve_max_rows(max_rows: int | None) -> int | None:
     if max_rows is not None:
         return max_rows
@@ -254,7 +309,6 @@ def _resolve_max_rows(max_rows: int | None) -> int | None:
     if not env_limit:
         return None
     return int(env_limit)
-
 
 def _scope_sql(max_rows: int | None) -> tuple[str, list]:
     if not max_rows:
@@ -271,7 +325,6 @@ WHERE rg.id IN (
         [max_rows],
     )
 
-
 def _training_cache_path() -> Path:
     legacy = RELEASE_GROUP_TRAINING_FEATURES_CACHE.parent / "rg_training_features.pkl"
     if RELEASE_GROUP_TRAINING_FEATURES_CACHE.is_file():
@@ -279,7 +332,6 @@ def _training_cache_path() -> Path:
     if legacy.is_file():
         return legacy
     return RELEASE_GROUP_TRAINING_FEATURES_CACHE
-
 
 def _normalize_list_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("tag_ids", "genre_ids", "secondary_type_ids"):
@@ -289,7 +341,6 @@ def _normalize_list_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _is_empty_list(x) -> bool:
     return isinstance(x, list) and len(x) == 0
-
 
 def _backfill_empty_genres_and_tags(conn, data: pd.DataFrame) -> pd.DataFrame:
     if data.empty:
@@ -372,7 +423,6 @@ def _classify_type(row) -> object:
         return 2
     return 3
 
-
 def _infer_missing_types(conn, data: pd.DataFrame) -> pd.DataFrame:
     null_type = data[data["type"].isna()].copy()
     if null_type.empty:
@@ -406,6 +456,123 @@ def _infer_missing_types(conn, data: pd.DataFrame) -> pd.DataFrame:
     data["type"] = data["type"].fillna(data["id"].map(computed_type_map)).astype("Int32")
     return data
 
+def _detect_lang(text_value):
+    identifier = NNetLanguageIdentifier(min_num_bytes=0, max_num_bytes=1000)
+
+    if text_value is None:
+        return None
+    text_value = str(text_value).strip()
+    if not text_value:
+        return None
+    result = identifier.FindLanguage(text_value)
+    if not result or not result.language:
+        return None
+    if hasattr(result, "is_reliable") and not result.is_reliable:
+        return None
+    return result.language
+
+def _normalize_detected_language(lang_code, original_text):
+    if not lang_code:
+        return None
+    if lang_code == "iw":
+        lang_code = "he"
+    if lang_code == "tl":
+        lang_code = "fil"
+
+    original_text = (original_text or "").strip()
+    has_ascii = any(ch.isascii() and ch.isalpha() for ch in original_text)
+    has_non_ascii = any(not ch.isascii() for ch in original_text)
+
+    translit_candidates = {"bg", "el", "hi", "ja", "ru", "zh"}
+    if lang_code in translit_candidates and has_ascii and not has_non_ascii:
+        latn_code = f"{lang_code}-Latn"
+        if latn_code in LANG_ID_MAP:
+            return latn_code
+
+    return lang_code
+
+def _fetch_release_texts(conn, release_group_ids):
+    if not release_group_ids:
+        return {}
+
+    with conn.cursor() as cur:
+        cur.execute(NULL_LANGUAGE_QUERY, (release_group_ids,))
+        rows = cur.fetchall()
+
+    agg = {}
+    for release_group_id, release_group_title, track_title in rows:
+        key = str(release_group_id)
+        item = agg.setdefault(key, {"release_group_title": "", "track_titles": []})
+        if release_group_title and not item["release_group_title"]:
+            item["release_group_title"] = str(release_group_title).strip()
+        if track_title and str(track_title).strip():
+            item["track_titles"].append(str(track_title).strip())
+    return agg
+
+def _fetch_languages(conn, df):
+    pre_language = df["language"].isna().sum()
+    pre_script = df["script"].isna().sum()
+
+    print('Getting languages and scripts from titles')
+
+    conn.rollback()
+
+    RELEASE_GROUP_COL = "id"
+    LANGUAGE_COL = "language"
+    SCRIPT_COL = "script"
+
+    VALID_LANGUAGE_IDS = set(LANG_ID_MAP.values())
+    VALID_SCRIPT_IDS = set(SCRIPT_ID_MAP.values())
+
+    if RELEASE_GROUP_COL not in df.columns:
+        raise KeyError(f"Missing column '{RELEASE_GROUP_COL}'. Available columns: {list(df.columns)}")
+
+    if LANGUAGE_COL not in df.columns:
+        df[LANGUAGE_COL] = None
+    if SCRIPT_COL not in df.columns:
+        df[SCRIPT_COL] = None
+
+    df[LANGUAGE_COL] = df[LANGUAGE_COL].astype("object")
+    df[SCRIPT_COL] = df[SCRIPT_COL].astype("object")
+
+    mask = df[LANGUAGE_COL].isna() | df[SCRIPT_COL].isna()
+    release_group_ids = df.loc[mask, RELEASE_GROUP_COL].dropna().astype(str).unique().tolist()
+    release_texts = _fetch_release_texts(conn, release_group_ids)
+
+    preds = pd.DataFrame(index=df.loc[mask].index, columns=["pred_language", "pred_script", "detected_code"])
+
+    for idx, row in df.loc[mask].iterrows():
+        rgid = str(row[RELEASE_GROUP_COL])
+        info = release_texts.get(rgid, {})
+        text = " ".join(
+            x for x in [info.get("release_group_title", ""), " ".join(info.get("track_titles", []))]
+            if str(x).strip()
+        ).strip()
+
+        detected = _detect_lang(text)
+        norm = _normalize_detected_language(detected, text)
+
+        preds.at[idx, "detected_code"] = norm
+        preds.at[idx, "pred_language"] = int(LANG_ID_MAP[norm]) if norm in LANG_ID_MAP else None
+        preds.at[idx, "pred_script"] = int(SCRIPT_ID_MAP[norm]) if norm in SCRIPT_ID_MAP else None
+
+    df.loc[df[LANGUAGE_COL].notna() & ~df[LANGUAGE_COL].astype(str).isin(VALID_LANGUAGE_IDS), LANGUAGE_COL] = None
+    df.loc[df[SCRIPT_COL].notna() & ~df[SCRIPT_COL].astype(str).isin(VALID_SCRIPT_IDS), SCRIPT_COL] = None
+
+    df.loc[preds.index, LANGUAGE_COL] = preds["pred_language"]
+    df.loc[preds.index, SCRIPT_COL] = preds["pred_script"]
+
+    df[LANGUAGE_COL] = df[LANGUAGE_COL].astype("Int32")
+    df[SCRIPT_COL] = df[SCRIPT_COL].astype("Int32")
+
+    post_language = df["language"].isna().sum()
+    post_script = df["script"].isna().sum()
+
+    updated_languages = pre_language - post_language
+    updated_scripts = pre_script - post_script
+
+    print(f"{updated_languages} languages updated, {updated_scripts} scripts updated")
+    return df
 
 def fetch_release_group_knn_training_data(
     conn,
@@ -415,6 +582,7 @@ def fetch_release_group_knn_training_data(
     use_cache: bool = False,
     refresh_cache: bool = False,
     backfill_empty_genres: bool = True,
+    backfill_lang_inference: bool = True,
 ) -> pd.DataFrame:
     max_rows = _resolve_max_rows(max_rows)
     cache_path = _training_cache_path()
@@ -444,6 +612,9 @@ def fetch_release_group_knn_training_data(
 
     if backfill_empty_genres:
         df = _backfill_empty_genres_and_tags(conn, df)
+
+    if backfill_lang_inference:
+        df = _fetch_languages(conn, df)
 
     if not skip_type_inference:
         df = _infer_missing_types(conn, df)
