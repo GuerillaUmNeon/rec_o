@@ -34,3 +34,4 @@ uvicorn==0.48.0
 wrapt==2.2.1
 matplotlib==3.10.9
 seaborn==0.13.2
+cld3-py==3.1.0

@@ -187,19 +187,21 @@ def send_ntfy_album_notification(input, album_output: AlbumPredictOutput):
             if album.genres else ""
         )
 
+        details = " - ".join(
+            part for part in [
+                format_tracks(album.tracks),
+                format_duration_ms(album.length)
+            ] if part
+        )
+
         block = [
             f"**{album.title}** - {album.artist}",
             random_genres,
-            " - ".join(
-                part for part in [
-                    format_tracks(album.tracks),
-                    format_duration_ms(album.length)
-                ] if part
-            ),
+            details,
             " | ".join(links)
         ]
 
-        blocks.append("\n".join(block))
+        blocks.append("\n".join(line for line in block if line))
 
     message = "\n\n".join(blocks)
 

@@ -55,7 +55,6 @@ def main() -> None:
         raw_df = fetch_release_group_knn_training_data(
             conn,
             max_rows=args.limit,
-            skip_type_inference=args.skip_type_inference,
             use_cache=args.use_cache,
             refresh_cache=args.refresh_cache,
         )
@@ -64,7 +63,13 @@ def main() -> None:
         raise SystemExit("No release group training rows returned from the database.")
 
     print(f"Release group training rows: {len(raw_df):,}")
-    artifact = build_release_group_knn_artifact(raw_df, n_neighbors=args.n_neighbors)
+
+    artifact = build_release_group_knn_artifact(
+        raw_df,
+        conn_factory=get_connection,
+        n_neighbors=args.n_neighbors,
+    )
+
     print(f"Artifact rows: {len(artifact['data_model']):,}")
 
     save_release_group_knn_artifact(artifact)

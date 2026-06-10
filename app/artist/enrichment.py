@@ -139,9 +139,10 @@ def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
     for artist in artist_output.artists:
         genre_text = ", ".join(artist.genre) if artist.genre else ""
 
-        line = f"- **{artist.name}**"
+        lines.append(f"- **{artist.name}**")
+
         if genre_text:
-            line += f" ({genre_text})"
+            lines.append(f"  Genres: {genre_text}")
 
         links = [f"[ListenBrainz](https://listenbrainz.org/artist/{artist.gid})"]
 
@@ -152,8 +153,7 @@ def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
         if official_site:
             links.append(f"[Official site]({official_site})")
 
-        line += " — " + " | ".join(links)
-        lines.append(line)
+        lines.append(f"  {' | '.join(links)}")
 
     message = "\n".join(lines)
 
