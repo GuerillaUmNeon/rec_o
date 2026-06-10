@@ -112,19 +112,6 @@ def recommend_release_group_ids_from_artifact(
     if not neighbor_lists:
         return []
 
-    # Merge results from multiple seed IDs (first-seen order)
-    # merged: list[int] = []
-    # seen = set(seed_ids) if exclude_seed else set()
-    # for batch in neighbor_lists:
-    #     for rg_id in batch:
-    #         if rg_id in seen:
-    #             continue
-    #         seen.add(rg_id)
-    #         merged.append(rg_id)
-    #         if len(merged) >= top_n:
-    #             return merged
-    # return merged
-
     result = pd.concat(neighbor_lists, ignore_index=True)
     result = result.sample(frac=1, random_state=seed).reset_index(drop=True)
 
