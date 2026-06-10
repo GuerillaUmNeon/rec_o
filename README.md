@@ -6,7 +6,7 @@ A **2-week bootcamp data science project** – FastAPI backend service for music
 
 ## Overview
 
-rec_o is the core backend engine of the recommendation system, built during a 2-week data science bootcamp. It combines machine learning models (KNN-based artist and release group recommendations) with a PostgreSQL database of MusicBrainz data to deliver personalized music suggestions through a production-ready FastAPI service.
+rec_o is the core backend engine of the recommendation system, built during a 2-week data science bootcamp. It combines machine learning models (KNN-based artist and release group recommendations) with real-time data from **ListenBrainz** and external notifications via **ntfy**.
 
 **Related Projects:**
 - **Frontend (Streamlit Archive):** [rec_o-front](https://github.com/GuerillaUmNeon/rec_o-front)
@@ -45,6 +45,10 @@ rec_o/
 - **PostgreSQL 3.3.4** (psycopg) – MusicBrainz database
 - **Google Cloud Storage 3.10.1** – Model artifact storage
 
+### External APIs & Integrations
+- **ListenBrainz API** – Fetch user listening history and enriched metadata
+- **ntfy API** – Send real-time notifications for recommendation updates
+
 ### Infrastructure & Utilities
 - **python-dotenv 1.2.2** – Environment configuration
 - **slowapi 0.1.9** – Rate limiting
@@ -63,6 +67,8 @@ Runs the inference-only API server that loads pre-trained models and responds to
 - Handle authentication via `X-API-Key` header
 - Implement request rate limiting
 - Connect to PostgreSQL for MusicBrainz data
+- Query **ListenBrainz API** for user listening habits and profile data
+- Send notifications via **ntfy API** for recommendation events
 
 See: [app/README_APP.md](app/README_APP.md)
 
@@ -131,6 +137,14 @@ RELEASE_GROUP_MODEL_LOCAL_PATH="models/release_group_model.pkl"
 # OR use GCS:
 # ARTIST_MODEL_BLOB_NAME="prod-artist-model"
 # RELEASE_GROUP_MODEL_BLOB_NAME="prod-release-group-model"
+
+# External APIs
+# ListenBrainz (optional, for user profile recommendations)
+# LISTENBRAINZ_API_URL="https://api.listenbrainz.org"
+
+# ntfy (optional, for sending notifications)
+# NTFY_URL="https://ntfy.sh"
+# NTFY_TOPIC="your-topic-name"
 ```
 
 Generate a secure token:
@@ -183,7 +197,15 @@ docker run --name rec-o-api \
   rec-o
 ```
 
-## Production Deployment (GCP)
+## Production Deployment (Google Cloud)
+
+### Infrastructure Overview
+
+The production deployment is hosted entirely on **Google Cloud Platform**:
+
+- **Backend API:** Deployed on Google Cloud Run (containerized via `cloudbuild.yaml`)
+- **Database:** PostgreSQL instance built from the **[MusicBrainz Docker mirror](https://github.com/metabrainz/musicbrainz-docker)** (@metabrainz/musicbrainz-docker), deployed on a Google Compute Engine VM
+- **Model Storage:** Pickled KNN models stored in Google Cloud Storage (GCS)
 
 ### Prerequisites
 
@@ -191,25 +213,39 @@ GCP project with these APIs enabled:
 - Cloud Build API
 - Artifact Registry API
 - Cloud Run Admin API
+- Cloud Compute API
 - Secret Manager API
 - Cloud Storage API
 
 ### Setup
 
-1. **Create GCP secrets** in Secret Manager:
+1. **Deploy MusicBrainz Database** on Google Compute Engine:
+   - Provision a Compute Engine VM instance
+   - Deploy the MusicBrainz Docker mirror using [@metabrainz/musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker)
+   - Configure PostgreSQL connection details for the API to access
+   - Store connection credentials in GCP Secret Manager
+
+2. **Create GCP secrets** in Secret Manager:
    - `TOKEN_API_KEY`
-   - `POSTGRES`, `DB_PORT`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD` (or `DATABASE_URL`)
+   - `POSTGRES` (Compute Engine VM internal/external IP)
+   - `DB_PORT`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD`
+   - Or provide `DATABASE_URL` directly
    - `ARTIST_MODEL_BLOB_NAME`
    - `RELEASE_GROUP_MODEL_BLOB_NAME`
+   - `LISTENBRAINZ_API_URL` (optional)
+   - `NTFY_URL` and `NTFY_TOPIC` (optional)
 
-2. **Upload model blobs** to Cloud Storage:
+3. **Upload model blobs** to Cloud Storage:
    - Train models locally
    - Upload to GCS bucket (reference blob names in secrets)
 
-3. **Deploy to Cloud Run**:
+4. **Deploy Backend to Cloud Run**:
    - Push to `main` branch
    - `cloudbuild.yaml` triggers automatic deployment
    - Environment variables mounted from Secret Manager
+   - API connects to MusicBrainz PostgreSQL on Compute Engine VM
+   - API queries ListenBrainz for user listening data
+   - API sends notifications via ntfy
 
 Full setup guide: [GCP_SETUP_STEPS.md](GCP_SETUP_STEPS.md)
 
@@ -232,6 +268,25 @@ Full setup guide: [GCP_SETUP_STEPS.md](GCP_SETUP_STEPS.md)
 - `GET /health` – Health check
 
 See: [app/README_APP.md](app/README_APP.md) for request/response formats
+
+## External API Integrations
+
+### ListenBrainz API
+The backend queries the **ListenBrainz API** to:
+- Fetch user listening history and statistics
+- Retrieve user top artists and albums
+- Enhance recommendation context with user listening patterns
+- Support profile-based recommendation endpoints (`/api/listenbrainz/artist` and `/api/listenbrainz/album`)
+
+**Documentation:** [listenbrainz.org/api](https://listenbrainz.org/api)
+
+### ntfy API
+The backend uses the **ntfy API** to:
+- Send real-time notifications for recommendation events
+- Notify users of new recommendations
+- Provide WebSocket-compatible notification delivery
+
+**Documentation:** [ntfy.sh/docs](https://docs.ntfy.sh/)
 
 ## ML Pipeline
 
@@ -284,6 +339,9 @@ Models are serialized as `.pkl` files and uploaded to GCS for production use.
 | `RELEASE_GROUP_MODEL_LOCAL_PATH` | No | Local path to album model `.pkl` |
 | `ARTIST_MODEL_BLOB_NAME` | No | GCS blob name for artist model |
 | `RELEASE_GROUP_MODEL_BLOB_NAME` | No | GCS blob name for album model |
+| `LISTENBRAINZ_API_URL` | No | ListenBrainz API endpoint (default: https://api.listenbrainz.org) |
+| `NTFY_URL` | No | ntfy API endpoint (default: https://ntfy.sh) |
+| `NTFY_TOPIC` | No | ntfy topic for sending notifications |
 
 *Either individual PostgreSQL vars OR `DATABASE_URL`
 
@@ -325,7 +383,11 @@ Thank you to all contributors who helped build the backend engine during the boo
 ## Resources
 
 - **MusicBrainz:** [musicbrainz.org](https://musicbrainz.org/)
+- **MusicBrainz Docker Mirror:** [github.com/metabrainz/musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker)
 - **ListenBrainz:** [listenbrainz.org](https://listenbrainz.org/)
+- **ListenBrainz API:** [listenbrainz.org/api](https://listenbrainz.org/api)
+- **ntfy:** [ntfy.sh](https://ntfy.sh)
+- **ntfy Docs:** [docs.ntfy.sh](https://docs.ntfy.sh/)
 - **FastAPI Docs:** [fastapi.tiangolo.com](https://fastapi.tiangolo.com/)
 - **Scikit-learn KNN:** [scikit-learn.org/modules/neighbors.html](https://scikit-learn.org/modules/neighbors.html)
 
