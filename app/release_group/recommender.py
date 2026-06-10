@@ -1,5 +1,5 @@
 """Release group KNN recommendations from a loaded artifact."""
-
+import pandas as pd
 from app.release_group.loader import get_release_group_model, load_release_group_model
 
 
@@ -18,66 +18,80 @@ def _recommend_release_group_ids_from_artifact(
     knn = pipeline.named_steps["knn"]
     preprocessor = pipeline.named_steps["preprocess"]
 
-    seed_ids = {int(rg_id) for rg_id in release_group_ids}
+    seed_ids = list(dict.fromkeys(int(rg_id) for rg_id in release_group_ids))
     exclude_ids = set(seed_ids)
     if blacklist:
         exclude_ids.update(int(rg_id) for rg_id in blacklist)
 
-    missing_ids = sorted(seed_ids - set(id_to_idx))
+    missing_ids = sorted(set(seed_ids) - set(id_to_idx))
     if missing_ids:
         raise RuntimeError(f"Unknown release group IDs: {missing_ids}")
 
-    neighbor_lists: list[list[int]] = []
-    for target_id in seed_ids:
-        row_idx = id_to_idx[target_id]
-        row_data = data_model.iloc[row_idx : row_idx + 1]
-        X_row = preprocessor.transform(row_data)
-        distances, indices = knn.kneighbors(
-            X_row,
-            n_neighbors=min(len(data_model), top_n + len(exclude_ids) + 50),
-        )
-
-        batch: list[int] = []
-        for idx in indices[0]:
-            rg_id = int(data_model.iloc[idx]["id"])
-            if rg_id in exclude_ids:
-                continue
-            if rg_id in batch:
-                continue
-            batch.append(rg_id)
-            if len(batch) >= top_n:
-                break
-        neighbor_lists.append(batch)
-
-    if not neighbor_lists:
+    if not seed_ids:
         return []
 
-    merged: list[int] = []
-    seen = set(exclude_ids)
-    for batch in neighbor_lists:
-        for rg_id in batch:
-            if rg_id in seen:
+    seed_rows = data_model.iloc[[id_to_idx[rg_id] for rg_id in seed_ids]].copy()
+
+    def _mode_or_na(series: pd.Series):
+        s = series.dropna()
+        if s.empty:
+            return pd.NA
+        mode = s.mode()
+        return mode.iloc[0] if not mode.empty else pd.NA
+
+    def _list_union(series: pd.Series) -> list[int]:
+        values = set()
+        for item in series:
+            if isinstance(item, list):
+                values.update(int(x) for x in item)
+        return sorted(values)
+
+    query_row = {}
+
+    for col in data_model.columns:
+        if col == "id":
+            query_row[col] = -1
+        elif col in {"tag_ids", "genre_ids", "secondary_type_ids"}:
+            query_row[col] = _list_union(seed_rows[col]) if col in seed_rows.columns else []
+        elif col == "year":
+            s = seed_rows[col].dropna()
+            query_row[col] = int(round(s.mean())) if not s.empty else pd.NA
+        elif col in {"type", "status", "language", "script"}:
+            query_row[col] = _mode_or_na(seed_rows[col]) if col in seed_rows.columns else pd.NA
+        else:
+            # Preserve unused columns if they exist in data_model
+            s = seed_rows[col].dropna()
+            query_row[col] = s.iloc[0] if not s.empty else pd.NA
+
+    query_df = pd.DataFrame([query_row], columns=data_model.columns)
+
+    X_query = preprocessor.transform(query_df)
+
+    distances, indices = knn.kneighbors(
+        X_query,
+        n_neighbors=min(len(data_model), top_n + len(exclude_ids) + 200),
+    )
+
+    genre_set = {int(g) for g in genre_ids} if genre_ids else None
+
+    results: list[int] = []
+    for idx in indices[0]:
+        row = data_model.iloc[idx]
+        rg_id = int(row["id"])
+
+        if rg_id in exclude_ids:
+            continue
+
+        if genre_set is not None:
+            row_genres = row.get("genre_ids") or []
+            if not (set(int(g) for g in row_genres) & genre_set):
                 continue
-            seen.add(rg_id)
-            merged.append(rg_id)
-            if len(merged) >= top_n:
-                break
-        if len(merged) >= top_n:
+
+        results.append(rg_id)
+        if len(results) >= top_n:
             break
 
-    if not genre_ids:
-        return merged
-
-    genre_set = {int(genre_id) for genre_id in genre_ids}
-    filtered: list[int] = []
-    for rg_id in merged:
-        row = data_model.loc[data_model["id"] == rg_id]
-        if row.empty:
-            continue
-        row_genres = row.iloc[0].get("genre_ids") or []
-        if set(row_genres) & genre_set:
-            filtered.append(rg_id)
-    return filtered[:top_n]
+    return results
 
 
 def recommend_release_group_ids(

@@ -549,7 +549,7 @@ def build_release_group_knn_artifact(
         "n_neighbors": n_neighbors,
     }
 
-
+# TODO: check if this function is useless
 def recommend_release_group_ids_from_artifact(
     artifact: dict,
     release_group_ids: list[int],
