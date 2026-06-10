@@ -9,10 +9,12 @@ RUN pip install --root-user-action=ignore --no-cache-dir --upgrade pip \
 COPY app/ ./app/
 
 # Minimal ml/ package so joblib can unpickle release_group artifacts
-# (ListToSparseTransformer is referenced as ml.release_group.features.*).
+# (pipeline steps reference ml.release_group.train.* and ml.release_group.features.*).
 COPY ml/__init__.py ./ml/
 COPY ml/release_group/__init__.py ./ml/release_group/
+COPY ml/release_group/config.py ./ml/release_group/
 COPY ml/release_group/features.py ./ml/release_group/
+COPY ml/release_group/train.py ./ml/release_group/
 
 EXPOSE 8000
 
