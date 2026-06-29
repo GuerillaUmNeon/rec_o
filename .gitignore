@@ -7,3 +7,5 @@ app/__pycache__/
 *.joblib
 ml/outputs/
 !ml/outputs/.gitkeep
+/notebooks/
+/models/
