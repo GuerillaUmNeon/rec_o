@@ -37,7 +37,7 @@ ARTIST_MODEL_BLOB_NAME = _env(
 
 # Optional cap for faster local artist training (see train_local --limit)
 ARTIST_ML_MAX_ARTISTS = _env("ARTIST_ML_MAX_ARTISTS", "ML_MAX_ARTISTS")
-ARTIST_TRAINING_FEATURES_CACHE = ML_OUTPUTS_DIR / "artist_training_features.pkl"
+ARTIST_TRAINING_FEATURES_CACHE = MODEL_DIR / "artist_training_features.pkl"
 
 # Batch size for extended genre SQL (scoped artist training)
 ARTIST_ML_GENRE_CHUNK_SIZE = int(

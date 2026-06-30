@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        help="Reuse ml/outputs/artist_training_features.pkl if present.",
+        help="Reuse models/artist_training_features.pkl if present.",
     )
     parser.add_argument(
         "--refresh-cache",
@@ -80,8 +80,6 @@ def main() -> None:
     print(f"Artifact rows (with genres): {len(artifact['data']):,}")
 
     save_artist_knn_artifact(artifact)
-    print("Done. Upload to GCS manually: python -m ml.artist.scripts.upload_artist")
-
 
 if __name__ == "__main__":
     main()

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import text
 
 from ml.artist.config import (
     ARTIST_ML_GENRE_CHUNK_SIZE,
@@ -519,7 +520,9 @@ def fetch_artist_knn_training_data_scoped(
 
     if max_artists:
         print(f"Fetching artist tags for at most {max_artists:,} artists...")
+    t0 = time.perf_counter()
     artist_rows = pd.read_sql_query(artist_query, conn, params=scope_params or None)
+    print(f"Artist tags query done in {time.perf_counter() - t0:.1f}s — {len(artist_rows):,} rows")
     if artist_rows.empty:
         return pd.DataFrame(
             columns=[
@@ -546,7 +549,7 @@ def fetch_artist_knn_training_data_scoped(
     else:
         print("Fetching extended genres for all artists (slow)...")
         artist_genres_query = _artist_genres_query(min_tag_count=min_tag_count)
-        artist_genres = pd.read_sql_query(artist_genres_query, conn)
+        artist_genres = pd.read_sql_query(text(artist_genres_query), conn)
 
     grouped = (
         artist_rows.groupby(
@@ -608,10 +611,10 @@ def fetch_artist_knn_training_data(
         return pd.read_pickle(training_cache_path)
 
     setup_steps = [
-        """
+        ("drop rec_o_credited_release_groups", """
         DROP TABLE IF EXISTS rec_o_credited_release_groups;
-        """,
-        """
+        """),
+        ("create rec_o_credited_release_groups", """
         CREATE TEMP TABLE rec_o_credited_release_groups ON COMMIT DROP AS
         SELECT artist_credit_name.artist AS id, release_group.id AS release_group_id
         FROM artist_credit_name
@@ -636,22 +639,22 @@ def fetch_artist_knn_training_data(
         FROM l_artist_release
         JOIN release
             ON release.id = l_artist_release.entity1;
-        """,
-        """
+        """),
+        ("index rec_o_credited_release_groups (id)", """
         CREATE INDEX rec_o_credited_release_groups_id_idx
             ON rec_o_credited_release_groups(id);
-        """,
-        """
+        """),
+        ("index rec_o_credited_release_groups (release_group)", """
         CREATE INDEX rec_o_credited_release_groups_release_group_idx
             ON rec_o_credited_release_groups(release_group_id);
-        """,
-        """
+        """),
+        ("analyze rec_o_credited_release_groups", """
         ANALYZE rec_o_credited_release_groups;
-        """,
-        """
+        """),
+        ("drop rec_o_credited_releases", """
         DROP TABLE IF EXISTS rec_o_credited_releases;
-        """,
-        """
+        """),
+        ("create rec_o_credited_releases", """
         CREATE TEMP TABLE rec_o_credited_releases ON COMMIT DROP AS
         SELECT artist_credit_name.artist AS id, release.id AS release_id
         FROM artist_credit_name
@@ -669,22 +672,22 @@ def fetch_artist_knn_training_data(
 
         SELECT l_artist_release.entity0 AS id, l_artist_release.entity1 AS release_id
         FROM l_artist_release;
-        """,
-        """
+        """),
+        ("index rec_o_credited_releases (id)", """
         CREATE INDEX rec_o_credited_releases_id_idx
             ON rec_o_credited_releases(id);
-        """,
-        """
+        """),
+        ("index rec_o_credited_releases (release)", """
         CREATE INDEX rec_o_credited_releases_release_idx
             ON rec_o_credited_releases(release_id);
-        """,
-        """
+        """),
+        ("analyze rec_o_credited_releases", """
         ANALYZE rec_o_credited_releases;
-        """,
-        """
+        """),
+        ("drop rec_o_primary_artist_genres", """
         DROP TABLE IF EXISTS rec_o_primary_artist_genres;
-        """,
-        f"""
+        """),
+        ("create rec_o_primary_artist_genres", f"""
         CREATE TEMP TABLE rec_o_primary_artist_genres ON COMMIT DROP AS
         SELECT artist_tag.artist AS id, genre.name AS genre
         FROM artist_tag
@@ -724,18 +727,18 @@ def fetch_artist_knn_training_data(
             ON tag.id = release_tag.tag
         JOIN genre
             ON LOWER(genre.name) = LOWER(tag.name);
-        """,
-        """
+        """),
+        ("index rec_o_primary_artist_genres (id)", """
         CREATE INDEX rec_o_primary_artist_genres_id_idx
             ON rec_o_primary_artist_genres(id);
-        """,
-        """
+        """),
+        ("analyze rec_o_primary_artist_genres", """
         ANALYZE rec_o_primary_artist_genres;
-        """,
-        """
+        """),
+        ("drop rec_o_artists_without_primary_genres", """
         DROP TABLE IF EXISTS rec_o_artists_without_primary_genres;
-        """,
-        """
+        """),
+        ("create rec_o_artists_without_primary_genres", """
         CREATE TEMP TABLE rec_o_artists_without_primary_genres ON COMMIT DROP AS
         SELECT artist.id
         FROM artist
@@ -746,18 +749,18 @@ def fetch_artist_knn_training_data(
               FROM rec_o_primary_artist_genres
               WHERE rec_o_primary_artist_genres.id = artist.id
           );
-        """,
-        """
+        """),
+        ("index rec_o_artists_without_primary_genres (id)", """
         CREATE INDEX rec_o_artists_without_primary_genres_id_idx
             ON rec_o_artists_without_primary_genres(id);
-        """,
-        """
+        """),
+        ("analyze rec_o_artists_without_primary_genres", """
         ANALYZE rec_o_artists_without_primary_genres;
-        """,
-        """
+        """),
+        ("drop rec_o_credited_recordings", """
         DROP TABLE IF EXISTS rec_o_credited_recordings;
-        """,
-        """
+        """),
+        ("create rec_o_credited_recordings", """
         CREATE TEMP TABLE rec_o_credited_recordings ON COMMIT DROP AS
         SELECT artist_credit_name.artist AS id, recording.id AS recording_id
         FROM artist_credit_name
@@ -772,22 +775,22 @@ def fetch_artist_knn_training_data(
         FROM l_artist_recording
         JOIN rec_o_artists_without_primary_genres
             ON rec_o_artists_without_primary_genres.id = l_artist_recording.entity0;
-        """,
-        """
+        """),
+        ("index rec_o_credited_recordings (id)", """
         CREATE INDEX rec_o_credited_recordings_id_idx
             ON rec_o_credited_recordings(id);
-        """,
-        """
+        """),
+        ("index rec_o_credited_recordings (recording)", """
         CREATE INDEX rec_o_credited_recordings_recording_idx
             ON rec_o_credited_recordings(recording_id);
-        """,
-        """
+        """),
+        ("analyze rec_o_credited_recordings", """
         ANALYZE rec_o_credited_recordings;
-        """,
-        """
+        """),
+        ("drop rec_o_artist_training_genres", """
         DROP TABLE IF EXISTS rec_o_artist_training_genres;
-        """,
-        f"""
+        """),
+        ("create rec_o_artist_training_genres", f"""
         CREATE TEMP TABLE rec_o_artist_training_genres ON COMMIT DROP AS
         SELECT id, genre
         FROM rec_o_primary_artist_genres
@@ -803,14 +806,14 @@ def fetch_artist_knn_training_data(
             ON tag.id = recording_tag.tag
         JOIN genre
             ON LOWER(genre.name) = LOWER(tag.name);
-        """,
-        """
+        """),
+        ("index rec_o_artist_training_genres (id)", """
         CREATE INDEX rec_o_artist_training_genres_id_idx
             ON rec_o_artist_training_genres(id);
-        """,
-        """
+        """),
+        ("analyze rec_o_artist_training_genres", """
         ANALYZE rec_o_artist_training_genres;
-        """,
+        """),
     ]
 
     print(
@@ -818,8 +821,10 @@ def fetch_artist_knn_training_data(
         f"(full DB, min_tag_count={min_tag_count})..."
     )
     t0 = time.perf_counter()
-    for sql in setup_steps:
-        conn.execute(sql)
+    for step_idx, (label, sql) in enumerate(setup_steps, 1):
+        step_t0 = time.perf_counter()
+        conn.execute(text(sql))
+        print(f"  [{step_idx}/{len(setup_steps)}] {label} ({time.perf_counter() - step_t0:.1f}s)")
 
     query = """
         SELECT
@@ -847,7 +852,7 @@ def fetch_artist_knn_training_data(
             artist_type.name,
             area.name
     """
-    grouped = pd.read_sql_query(query, conn)
+    grouped = pd.read_sql_query(text(query), conn)
     print(f"Recommender training query done in {time.perf_counter() - t0:.1f}s")
 
     if grouped.empty:

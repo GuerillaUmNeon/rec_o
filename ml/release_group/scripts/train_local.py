@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        help="Reuse ml/outputs/release_group_training_features.pkl if present.",
+        help="Reuse models/release_group_training_features.pkl if present.",
     )
     parser.add_argument(
         "--refresh-cache",
@@ -73,6 +73,7 @@ def main() -> None:
     print(f"Artifact rows: {len(artifact['data_model']):,}")
 
     save_release_group_knn_artifact(artifact)
+
 
 if __name__ == "__main__":
     main()
