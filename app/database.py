@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
-import psycopg
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
@@ -35,17 +35,19 @@ def _get_database_url() -> str:
 
     user_q = quote_plus(user)
     password_q = quote_plus(password)
-    return f"postgresql://{user_q}:{password_q}@{host}:{port}/{database}"
+    return f"postgresql+psycopg://{user_q}:{password_q}@{host}:{port}/{database}"
 
 
-def get_connection():
-    """Open a PostgreSQL connection. Close it when done (or use a ``with`` block)."""
-    return psycopg.connect(_get_database_url())
+engine = create_engine(_get_database_url(), connect_args={"connect_timeout": 300})
 
 
 def fetch_all(query: str, params: tuple | None = None) -> list:
-    """Run a SELECT and return all rows. Opens and closes the connection."""
-    with get_connection() as conn: # close the connection when done
-        with conn.cursor() as cursor: # close the cursor when done
-            cursor.execute(query, params)
-            return cursor.fetchall()
+    """Run a SELECT and return all rows."""
+    with engine.connect() as conn:
+        # For positional parameters, we need to pass a list or just execute it directly
+        # with psycopg2/psycopg3 style query. 
+        # But SQLAlchemy text() wants named parameters if we use : syntax.
+        # If we use %s, it might be an issue. 
+        # Let's try raw execution if it's positional.
+        result = conn.execute(text(query), params or {})
+        return result.fetchall()

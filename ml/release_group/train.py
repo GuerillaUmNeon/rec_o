@@ -9,6 +9,7 @@ from gcld3 import NNetLanguageIdentifier
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.neighbors import NearestNeighbors
 from sklearn.pipeline import Pipeline
+from sqlalchemy import text
 
 from ml.release_group.config import (
     DEFAULT_N_NEIGHBORS,
@@ -211,9 +212,15 @@ SCRIPT_ID_MAP = {
 def _normalize_list_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in ("tag_ids", "genre_ids", "secondary_type_ids"):
         if col in df.columns:
-            df[col] = df[col].apply(
-                lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x])
-            )
+            vals = df[col].tolist()
+            for i, x in enumerate(vals):
+                if not isinstance(x, list):
+                    try:
+                        is_na = pd.isna(x)
+                    except (ValueError, TypeError):
+                        is_na = False
+                    vals[i] = [] if is_na else [x]
+            df[col] = vals
     return df
 
 
@@ -263,7 +270,7 @@ def _fetch_release_texts(conn, release_group_ids):
     if not release_group_ids:
         return {}
 
-    with conn.cursor() as cur:
+    with conn.connection.cursor() as cur:
         cur.execute(NULL_LANGUAGE_QUERY, (release_group_ids,))
         rows = cur.fetchall()
 
@@ -296,8 +303,9 @@ def _classify_type(row) -> object:
 
 
 class BackfillGenresTagsTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, conn_factory):
+    def __init__(self, conn_factory, chunk_size: int = 50_000):
         self.conn_factory = conn_factory
+        self.chunk_size = chunk_size
 
     def fit(self, X, y=None):
         return self
@@ -322,20 +330,30 @@ class BackfillGenresTagsTransformer(BaseEstimator, TransformerMixin):
             print("No release groups with empty genre list.")
             return data
 
-        with self.conn_factory() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
+        chunks = [
+            empty_genre_rg_ids[i:i + self.chunk_size]
+            for i in range(0, len(empty_genre_rg_ids), self.chunk_size)
+        ]
+        result_parts = []
+        for chunk_idx, chunk_ids in enumerate(chunks, 1):
+            print(f"  Backfill genre chunk {chunk_idx}/{len(chunks)} ({len(chunk_ids):,} IDs)...")
+            with self.conn_factory() as conn:
+                conn.execute(text("""
                     CREATE TEMP TABLE IF NOT EXISTS tmp_empty_genre_rg (
                         release_group_id INT PRIMARY KEY
-                    ) ON COMMIT DROP;
-                """)
-                cur.execute("TRUNCATE TABLE tmp_empty_genre_rg;")
-                cur.executemany(
-                    "INSERT INTO tmp_empty_genre_rg (release_group_id) VALUES (%s) ON CONFLICT DO NOTHING;",
-                    ((rg_id,) for rg_id in empty_genre_rg_ids),
+                    ) ON COMMIT PRESERVE ROWS;
+                """))
+                conn.execute(text("TRUNCATE TABLE tmp_empty_genre_rg;"))
+                conn.execute(
+                    text("INSERT INTO tmp_empty_genre_rg (release_group_id) VALUES (:rg_id) ON CONFLICT DO NOTHING;"),
+                    [{"rg_id": rg_id} for rg_id in chunk_ids],
                 )
 
-            df_result = pd.read_sql_query(RECORDING_GENRES_QUERY, conn)
+                df_chunk = pd.read_sql_query(text(RECORDING_GENRES_QUERY), conn)
+                if not df_chunk.empty:
+                    result_parts.append(df_chunk)
+
+        df_result = pd.concat(result_parts, ignore_index=True) if result_parts else pd.DataFrame(columns=["id", "tag_ids", "genre_ids"])
 
         print(f"Rows returned from fallback genre query: {len(df_result)}")
 
@@ -344,27 +362,39 @@ class BackfillGenresTagsTransformer(BaseEstimator, TransformerMixin):
 
         df_result = _normalize_list_columns(df_result)
 
-        computed_genre_map = df_result.set_index("id")["genre_ids"]
-        computed_tag_map = df_result.set_index("id")["tag_ids"]
+        print("Building lookup dicts...")
+        tag_dict = {}
+        genre_dict = {}
+        for row_id, tags, genres in zip(
+            df_result["id"], df_result["tag_ids"], df_result["genre_ids"]
+        ):
+            tag_dict[row_id] = tags if isinstance(tags, list) else []
+            genre_dict[row_id] = genres if isinstance(genres, list) else []
 
-        mask_empty_tag = data["tag_ids"].apply(_is_empty_list)
-        mapped_tag = data.loc[mask_empty_tag, "id"].map(computed_tag_map)
-        data.loc[mask_empty_tag, "tag_ids"] = mapped_tag.apply(
-            lambda x: x if isinstance(x, list) else []
-        )
+        print("Applying backfilled tags and genres...")
+        tag_col = data["tag_ids"].tolist()
+        genre_col = data["genre_ids"].tolist()
+        id_col = data["id"].tolist()
 
-        mask_empty_genre = data["genre_ids"].apply(_is_empty_list)
-        mapped_genre = data.loc[mask_empty_genre, "id"].map(computed_genre_map)
-        data.loc[mask_empty_genre, "genre_ids"] = mapped_genre.apply(
-            lambda x: x if isinstance(x, list) else []
-        )
+        for i, row_id in enumerate(id_col):
+            cur_tags = tag_col[i]
+            if isinstance(cur_tags, list) and len(cur_tags) == 0 and row_id in tag_dict:
+                tag_col[i] = tag_dict[row_id]
+            cur_genres = genre_col[i]
+            if isinstance(cur_genres, list) and len(cur_genres) == 0 and row_id in genre_dict:
+                genre_col[i] = genre_dict[row_id]
+
+        data["tag_ids"] = tag_col
+        data["genre_ids"] = genre_col
+        print("Backfill complete.")
 
         return data
 
 
 class LanguageScriptInferenceTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, conn_factory):
+    def __init__(self, conn_factory, chunk_size: int = 50_000):
         self.conn_factory = conn_factory
+        self.chunk_size = chunk_size
 
     def fit(self, X, y=None):
         return self
@@ -386,15 +416,29 @@ class LanguageScriptInferenceTransformer(BaseEstimator, TransformerMixin):
         mask = df["language"].isna() | df["script"].isna()
         release_group_ids = df.loc[mask, "id"].dropna().astype(int).unique().tolist()
 
-        with self.conn_factory() as conn:
-            release_texts = _fetch_release_texts(conn, release_group_ids)
+        print(f"Fetching release texts for {len(release_group_ids):,} release groups...")
+        release_texts = {}
+        for start in range(0, len(release_group_ids), self.chunk_size):
+            batch = release_group_ids[start:start + self.chunk_size]
+            print(f"  Language chunk {start // self.chunk_size + 1}/{(len(release_group_ids) + self.chunk_size - 1) // self.chunk_size} ({len(batch):,} IDs)...")
+            with self.conn_factory() as conn:
+                batch_texts = _fetch_release_texts(conn, batch)
+            release_texts.update(batch_texts)
 
-        preds = pd.DataFrame(index=df.loc[mask].index, columns=["pred_language", "pred_script"])
+        pred_languages = []
+        pred_scripts = []
+        mask_indices = df.loc[mask].index.tolist()
+        mask_ids = df.loc[mask, "id"].tolist()
+        total = len(mask_indices)
 
-        for idx, row in df.loc[mask].iterrows():
-            rgid = str(int(row["id"]))
+        print(f"Detecting languages for {total:,} release groups...")
+        for i, (idx, row_id) in enumerate(zip(mask_indices, mask_ids)):
+            if i > 0 and i % 100_000 == 0:
+                print(f"  Language detection progress: {i:,}/{total:,}")
+
+            rgid = str(int(row_id))
             info = release_texts.get(rgid, {})
-            text = " ".join(
+            text_val = " ".join(
                 x for x in [
                     info.get("release_group_title", ""),
                     " ".join(info.get("track_titles", []))
@@ -402,11 +446,13 @@ class LanguageScriptInferenceTransformer(BaseEstimator, TransformerMixin):
                 if str(x).strip()
             ).strip()
 
-            detected = _detect_lang(text)
-            norm = _normalize_detected_language(detected, text)
+            detected = _detect_lang(text_val)
+            norm = _normalize_detected_language(detected, text_val)
 
-            preds.at[idx, "pred_language"] = int(LANG_ID_MAP[norm]) if norm in LANG_ID_MAP else pd.NA
-            preds.at[idx, "pred_script"] = int(SCRIPT_ID_MAP[norm]) if norm in SCRIPT_ID_MAP else pd.NA
+            pred_languages.append(int(LANG_ID_MAP[norm]) if norm in LANG_ID_MAP else pd.NA)
+            pred_scripts.append(int(SCRIPT_ID_MAP[norm]) if norm in SCRIPT_ID_MAP else pd.NA)
+
+        print(f"Language detection complete for {total:,} rows.")
 
         bad_language_mask = df["language"].notna() & ~df["language"].isin(valid_language_ids)
         bad_script_mask = df["script"].notna() & ~df["script"].isin(valid_script_ids)
@@ -414,8 +460,8 @@ class LanguageScriptInferenceTransformer(BaseEstimator, TransformerMixin):
         df.loc[bad_language_mask, "language"] = pd.NA
         df.loc[bad_script_mask, "script"] = pd.NA
 
-        df.loc[preds.index, "language"] = preds["pred_language"]
-        df.loc[preds.index, "script"] = preds["pred_script"]
+        df.loc[mask_indices, "language"] = pred_languages
+        df.loc[mask_indices, "script"] = pred_scripts
 
         df["language"] = df["language"].astype("Int32")
         df["script"] = df["script"].astype("Int32")
@@ -528,12 +574,25 @@ def build_release_group_knn_artifact(
         )
     ))
 
-    pipeline = Pipeline(steps=steps)
-    pipeline.fit(data)
-
+    # Fit each step manually to avoid running heavy transformers twice.
+    # (Pipeline.fit would fit_transform all steps, then we'd need to
+    #  re-transform to capture intermediate data — doubling the work.)
     transformed_data = data.copy()
-    for _, step in pipeline.steps[:-2]:
-        transformed_data = step.transform(transformed_data)
+    for _name, step in steps[:-2]:
+        transformed_data = step.fit_transform(transformed_data)
+
+    preprocess_step = steps[-2][1]
+    knn_step = steps[-1][1]
+    X_sparse = preprocess_step.fit_transform(transformed_data)
+    knn_step.fit(X_sparse)
+
+    pipeline = Pipeline(steps=steps)
+
+    # Clear conn_factory on fitted transformers so the artifact is picklable
+    # (lambdas / closures cannot be pickled by joblib).
+    for _name, step in pipeline.steps:
+        if hasattr(step, "conn_factory"):
+            step.conn_factory = None
 
     id_to_idx = {row_id: idx for idx, row_id in enumerate(transformed_data["id"])}
 

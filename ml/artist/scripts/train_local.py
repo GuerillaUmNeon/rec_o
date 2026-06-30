@@ -9,7 +9,7 @@ Run from project root:
 
 import argparse
 
-from app.database import get_connection
+from app.database import engine
 from ml.artist.artifact import save_artist_knn_artifact
 from ml.artist.data import (
     fetch_artist_knn_training_data,
@@ -54,7 +54,7 @@ def main() -> None:
     args = parse_args()
     use_scoped_fetch = args.limit is not None or args.skip_extended_genres
 
-    with get_connection() as conn:
+    with engine.connect() as conn:
         if use_scoped_fetch:
             raw_df = fetch_artist_knn_training_data_scoped(
                 conn,

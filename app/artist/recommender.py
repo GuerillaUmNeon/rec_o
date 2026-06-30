@@ -1,7 +1,8 @@
 """Artist KNN recommendations from a loaded artifact."""
 
-from app.database import get_connection
+from app.database import engine
 from app.artist.loader import get_artist_model, load_artist_model
+from sqlalchemy import text
 
 
 def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
@@ -16,13 +17,12 @@ def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
     if not candidate_ids:
         return []
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
                 WITH candidate_ids(id, ord) AS (
                     SELECT *
-                    FROM unnest(%s::int[]) WITH ORDINALITY
+                    FROM unnest(:ids::int[]) WITH ORDINALITY
                 ),
                 primary_artists AS (
                     SELECT DISTINCT acn.artist AS id
@@ -51,10 +51,10 @@ def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
                     ON artist_type.id = artist.type
                 WHERE artist_type.name IN ('Person', 'Group')
                 ORDER BY candidate_ids.ord
-                """,
-                (candidate_ids,),
-            )
-            return [int(row[0]) for row in cur.fetchall()]
+            """),
+            {"ids": candidate_ids},
+        )
+        return [int(row[0]) for row in result.fetchall()]
 
 
 def _recommend_artist_ids_from_artifact(
