@@ -23,7 +23,6 @@ rec_o/
 ├── models/           # Local .pkl artifacts (after training)
 ├── notebooks/        # Jupyter notebooks for exploration
 ├── Dockerfile        # Container for production deployment
-├── cloudbuild.yaml   # GCP Cloud Run CI/CD config
 └── requirements.txt
 ```
 
@@ -197,58 +196,6 @@ docker run --name rec-o-api \
   rec-o
 ```
 
-## Production Deployment (Google Cloud)
-
-### Infrastructure Overview
-
-The production deployment is hosted entirely on **Google Cloud Platform**:
-
-- **Backend API:** Deployed on Google Cloud Run (containerized via `cloudbuild.yaml`)
-- **Database:** PostgreSQL instance built from the **[MusicBrainz Docker mirror](https://github.com/metabrainz/musicbrainz-docker)** (@metabrainz/musicbrainz-docker), deployed on a Google Compute Engine VM
-- **Model Storage:** Pickled KNN models stored in Google Cloud Storage (GCS)
-
-### Prerequisites
-
-GCP project with these APIs enabled:
-- Cloud Build API
-- Artifact Registry API
-- Cloud Run Admin API
-- Cloud Compute API
-- Secret Manager API
-- Cloud Storage API
-
-### Setup
-
-1. **Deploy MusicBrainz Database** on Google Compute Engine:
-   - Provision a Compute Engine VM instance
-   - Deploy the MusicBrainz Docker mirror using [@metabrainz/musicbrainz-docker](https://github.com/metabrainz/musicbrainz-docker)
-   - Configure PostgreSQL connection details for the API to access
-   - Store connection credentials in GCP Secret Manager
-
-2. **Create GCP secrets** in Secret Manager:
-   - `TOKEN_API_KEY`
-   - `POSTGRES` (Compute Engine VM internal/external IP)
-   - `DB_PORT`, `DATABASE`, `DB_USERNAME`, `DB_PASSWORD`
-   - Or provide `DATABASE_URL` directly
-   - `ARTIST_MODEL_BLOB_NAME`
-   - `RELEASE_GROUP_MODEL_BLOB_NAME`
-   - `LISTENBRAINZ_API_URL` (optional)
-   - `NTFY_URL` and `NTFY_TOPIC` (optional)
-
-3. **Upload model blobs** to Cloud Storage:
-   - Train models locally
-   - Upload to GCS bucket (reference blob names in secrets)
-
-4. **Deploy Backend to Cloud Run**:
-   - Push to `main` branch
-   - `cloudbuild.yaml` triggers automatic deployment
-   - Environment variables mounted from Secret Manager
-   - API connects to MusicBrainz PostgreSQL on Compute Engine VM
-   - API queries ListenBrainz for user listening data
-   - API sends notifications via ntfy
-
-Full setup guide: [GCP_SETUP_STEPS.md](GCP_SETUP_STEPS.md)
-
 ## API Endpoints
 
 ### Search
@@ -371,7 +318,6 @@ Thank you to all contributors who helped build the backend engine during the boo
 |----------|---------|
 | [app/README_APP.md](app/README_APP.md) | API routes, model loading, Docker deployment |
 | [ml/README_ML.md](ml/README_ML.md) | Training scripts, GCS upload, environment setup |
-| [GCP_SETUP_STEPS.md](GCP_SETUP_STEPS.md) | Cloud Run deployment, VPC, Secret Manager, production setup |
 
 ## Related Projects
 

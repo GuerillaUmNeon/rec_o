@@ -9,7 +9,7 @@ Run from project root:
 
 import argparse
 
-from app.database import get_connection
+from app.database import engine
 from ml.artist.artifact import save_artist_knn_artifact
 from ml.artist.data import (
     fetch_artist_knn_training_data,
@@ -34,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        help="Reuse ml/outputs/artist_training_features.pkl if present.",
+        help="Reuse models/artist_training_features.pkl if present.",
     )
     parser.add_argument(
         "--refresh-cache",
@@ -54,7 +54,7 @@ def main() -> None:
     args = parse_args()
     use_scoped_fetch = args.limit is not None or args.skip_extended_genres
 
-    with get_connection() as conn:
+    with engine.connect() as conn:
         if use_scoped_fetch:
             raw_df = fetch_artist_knn_training_data_scoped(
                 conn,
@@ -80,8 +80,6 @@ def main() -> None:
     print(f"Artifact rows (with genres): {len(artifact['data']):,}")
 
     save_artist_knn_artifact(artifact)
-    print("Done. Upload to GCS manually: python -m ml.artist.scripts.upload_artist")
-
 
 if __name__ == "__main__":
     main()

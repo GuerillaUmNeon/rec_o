@@ -9,7 +9,7 @@ Run from project root:
 
 import argparse
 
-from app.database import get_connection
+from app.database import engine
 from ml.release_group.artifact import save_release_group_knn_artifact
 from ml.release_group.config import DEFAULT_N_NEIGHBORS
 from ml.release_group.data import fetch_release_group_knn_training_data
@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-cache",
         action="store_true",
-        help="Reuse ml/outputs/release_group_training_features.pkl if present.",
+        help="Reuse models/release_group_training_features.pkl if present.",
     )
     parser.add_argument(
         "--refresh-cache",
@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    with get_connection() as conn:
+    with engine.connect() as conn:
         raw_df = fetch_release_group_knn_training_data(
             conn,
             max_rows=args.limit,
@@ -66,14 +66,13 @@ def main() -> None:
 
     artifact = build_release_group_knn_artifact(
         raw_df,
-        conn_factory=get_connection,
+        conn_factory=lambda: engine.connect(),
         n_neighbors=args.n_neighbors,
     )
 
     print(f"Artifact rows: {len(artifact['data_model']):,}")
 
     save_release_group_knn_artifact(artifact)
-    print("Done. Upload to GCS manually: python -m ml.release_group.scripts.upload_release_group")
 
 
 if __name__ == "__main__":

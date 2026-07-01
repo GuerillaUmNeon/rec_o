@@ -8,15 +8,13 @@ import joblib
 from ml.artist.config import (
     ARTIST_CANONICAL_MODEL_PATH,
     ARTIST_MODEL_LOCAL_FILENAME,
-    ML_OUTPUTS_DIR,
     MODEL_DIR,
 )
 
 
 def save_artist_knn_artifact(artifact: dict, filename: str | None = None) -> Path:
-    """Dump artist KNN artifact to models/ (canonical + timestamped) and ml/outputs/."""
+    """Dump artist KNN artifact to models/ (canonical + timestamped)."""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    ML_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
     default_stem = Path(ARTIST_MODEL_LOCAL_FILENAME).stem
     default_suffix = Path(ARTIST_MODEL_LOCAL_FILENAME).suffix or ".pkl"
@@ -29,15 +27,11 @@ def save_artist_knn_artifact(artifact: dict, filename: str | None = None) -> Pat
     if model_path.suffix not in {".pkl", ".joblib"}:
         model_path = model_path.with_suffix(default_suffix)
 
-    output_copy = ML_OUTPUTS_DIR / ARTIST_MODEL_LOCAL_FILENAME
-
     joblib.dump(artifact, model_path)
     joblib.dump(artifact, ARTIST_CANONICAL_MODEL_PATH)
-    joblib.dump(artifact, output_copy)
 
     print(f"Saved locally: {model_path}")
     print(f"Canonical copy: {ARTIST_CANONICAL_MODEL_PATH}")
-    print(f"Copy in outputs: {output_copy}")
 
     return model_path
 

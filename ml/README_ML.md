@@ -39,12 +39,6 @@ Each subpackage uses `train_local` + `upload_*` separately (no single pipeline s
 ## Prerequisites
 
 - `.env` with Postgres (`DATABASE_URL` or `POSTGRES`, `DATABASE`, etc.)
-- For upload only:
-  - `MODEL_BUCKET_NAME=rec-o-models`
-  - `ARTIST_MODEL_BLOB_NAME=models/knn_model_test_joris_slim.pkl`
-  - `RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model.pkl`
-  - `gcloud auth application-default login` on project **rec-o-gcp**
-  - IAM: **Storage Object Creator** on bucket `rec-o-models`
 
 Optional in `.env`:
 
@@ -64,9 +58,9 @@ ARTIST_MODEL_LOCAL_FILENAME=knn_model_test_joris_slim.pkl
 |----------|---------|------------|
 | `MODEL_BUCKET_NAME` | API + ML upload (all models) | `rec-o-models` |
 | `ARTIST_MODEL_BLOB_NAME` | API download + `upload_artist` | `models/knn_model_test_joris_slim.pkl` |
-| `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `knn_model_test_joris_slim.pkl` |
+| `ARTIST_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`) | `knn_model_test_joris_slim.pkl` |
 | `RELEASE_GROUP_MODEL_BLOB_NAME` | API download + `upload_release_group` | `models/release_group_knn_model.pkl` |
-| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`, `ml/outputs/`) | `release_group_knn_model.pkl` |
+| `RELEASE_GROUP_MODEL_LOCAL_FILENAME` | `train_local` saves (`models/`) | `release_group_knn_model.pkl` |
 
 Cloud Run prod reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — your local `.env` test values do not change prod until you upload to the prod blob path and update the secret.
 
@@ -104,12 +98,11 @@ python -m ml.artist.scripts.train_local --limit 20000 --use-cache --refresh-cach
 | `--refresh-cache` | Re-fetch SQL even with `--use-cache` |
 
 ### Output files (local only, no GCS)
-
+ 
 | File | What it is |
 |------|------------|
 | `ml/outputs/artist_training_features.pkl` | **SQL cache** — see below |
 | `models/<ARTIST_MODEL_LOCAL_FILENAME>` | **Trained model** (canonical; used by `upload_artist` by default) |
-| `ml/outputs/<ARTIST_MODEL_LOCAL_FILENAME>` | Same artifact (convenience copy) |
 | `models/<stem>_<timestamp>.pkl` | Timestamped backup per run |
 
 #### `artist_training_features.pkl` (intermediate cache)
@@ -140,60 +133,8 @@ Pickled dict for the API:
 
 Produced only after training finishes. Upload this one to GCS with `upload_artist`.
 
-## 2. Upload to GCS (manual)
-
-After a successful `train_local`:
-
-```bash
-gcloud config set project rec-o-gcp
-gcloud auth application-default login
-python -m ml.artist.scripts.upload_artist
-```
-
-Custom path:
-
-```bash
-python -m ml.artist.scripts.upload_artist --path ml/outputs/knn_model_test_joris_slim.pkl
-```
-
-Default lookup (no `--path`): `models/<ARTIST_MODEL_LOCAL_FILENAME>`, then `ml/outputs/<ARTIST_MODEL_LOCAL_FILENAME>` (from `.env`).
-
-### `.env` vs GCP credentials
-
-| Variable | Role |
-|----------|------|
-| `ARTIST_MODEL_BLOB_NAME` | Artist KNN GCS object path (API + upload) |
-| `ARTIST_MODEL_LOCAL_FILENAME` | Local file `upload_artist` looks up (and `train_local` writes) |
-| `MODEL_BUCKET_NAME` | Bucket, e.g. `rec-o-models` |
-
-**Putting only the GCP project name in `.env` does not fix a 403.** Upload uses **Application Default Credentials** (ADC). The project name does not replace a service account that lacks `storage.objects.create` on `rec-o-models` (typical error: `le-wagon-data-bootcamp@airy-cogency-493213-t4...` from another project).
-
-| In `.env` | Fixes 403? |
-|-----------|------------|
-| `MODEL_*` paths | No — only **where** / **which file** |
-| Project name only | No — does not change **who** authenticates |
-| `GOOGLE_APPLICATION_CREDENTIALS` + JSON key for **rec-o-gcp** | Yes — if that SA has **Storage Object Creator** on the bucket |
-
-**Recommended fix:**
-
-```bash
-echo "$GOOGLE_APPLICATION_CREDENTIALS"
-```
-
-If you see a path (e.g. `.../airy-cogency-493213-t4-....json`), every **new terminal** reloads it from `~/.zshrc` — comment out that `export` line, then `source ~/.zshrc`. `unset` alone is not enough until the shell config is fixed.
-
-```bash
-unset GOOGLE_APPLICATION_CREDENTIALS
-gcloud config set project rec-o-gcp
-gcloud auth application-default login    # use a Google account with access to rec-o-gcp
-python -m ml.artist.scripts.upload_artist
-```
-
-Check the success line ends with your model blob, e.g. `gs://rec-o-models/models/knn_model_test_joris_slim.pkl`. If 403 persists, request **Storage Object Creator** on `rec-o-models` for your user in project **rec-o-gcp**.
-
-Production Cloud Run reads `ARTIST_MODEL_BLOB_NAME` and `RELEASE_GROUP_MODEL_BLOB_NAME` from Secret Manager — update the secret and redeploy a revision to switch models (no image rebuild). See [GCP_SETUP_STEPS.md](../GCP_SETUP_STEPS.md).
-
----
+## 2. Model usage
+Train and save locally; see [app/README_APP.md](../app/README_APP.md) for how the API loads artifacts.
 
 ## Release group KNN (`ml/release_group/`)
 
@@ -222,10 +163,7 @@ python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inferenc
 | `--n-neighbors N` | KNN neighbors (default `10`) |
 
 ### Upload to GCS
-
-```bash
-python -m ml.release_group.scripts.upload_release_group
-```
+Deprecated. Local training only.
 
 ### `.env` (release group)
 

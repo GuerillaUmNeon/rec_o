@@ -174,12 +174,16 @@ def fetch_release_group_knn_training_data(
 
     scope_sql, scope_params = _scope_sql(max_rows)
     query = RELEASE_GROUP_FEATURES_QUERY.format(scope_sql=scope_sql)
+    # Convert list of parameters to a tuple for SQLAlchemy
+    params = tuple(scope_params) if scope_params else None
 
     if max_rows:
         print(f"Fetching release group features for at most {max_rows:,} rows...")
 
     t0 = time.perf_counter()
-    df = pd.read_sql_query(query, conn, params=scope_params or None)
+    # Read in chunks to avoid overwhelming the connection
+    chunks = pd.read_sql_query(query, conn, params=params, chunksize=1000)
+    df = pd.concat(chunks, ignore_index=True)
     print(f"Main SQL done in {time.perf_counter() - t0:.1f}s — {len(df):,} rows")
 
     df = df.astype({

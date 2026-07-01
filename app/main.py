@@ -17,7 +17,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from app.artist.enrichment import get_top_lb, send_ntfy_artist_notification
-from app.database import fetch_all, get_connection
+from app.database import fetch_all, engine
 from app.artist import enrich_artists_from_db, recommend_artist_ids
 from app.release_group import enrich_release_groups_from_db, recommend_release_group_ids
 from app.models import get_models_info, load_models
@@ -156,7 +156,7 @@ def predict(
             blacklist_artist_ids=input.BlacklistArtistIds,
         )
 
-        with get_connection() as conn:
+        with engine.connect() as conn:
             artist_df = enrich_artists_from_db(artist_ids, conn)
 
     except RuntimeError as exc:
@@ -191,7 +191,7 @@ def predict_album(
             genre_ids=input.genre_id,
         )
 
-        with get_connection() as conn:
+        with engine.connect() as conn:
             albums_df = enrich_release_groups_from_db(release_group_ids, conn)
 
     except RuntimeError as exc:
@@ -227,7 +227,7 @@ def search_album(
     Example: "abbey" matches titles containing "abbey".
     Returns at most 20 results.
     """
-    rows = fetch_all(ALBUM_SEARCH_QUERY, (f"%{input.title}%",))
+    rows = fetch_all(ALBUM_SEARCH_QUERY, {"title": f"%{input.title}%"})
 
     return [
         AlbumSearchOutput(
@@ -251,7 +251,7 @@ def search_artist(
     Example: "daft" matches names containing "daft".
     Returns at most 20 results.
     """
-    rows = fetch_all(ARTIST_SEARCH_QUERY, (f"%{input.name}%",))
+    rows = fetch_all(ARTIST_SEARCH_QUERY, {"name": f"%{input.name}%"})
 
     return [
         ArtistSearchOutput(
@@ -276,7 +276,7 @@ def search_genre(
     """
     rows = fetch_all(
         GENRE_SEARCH_QUERY,
-        (f"%{input.genre_name}%",)
+        {"genre_name": f"%{input.genre_name}%"}
     )
 
     return [
@@ -296,7 +296,7 @@ def lb_artist_predict(
     artists = get_top_lb(input.username, input.range, input.min_listen, "artists", input.token)
     artist_mbids = [artist["artist_mbid"] for artist in artists]
 
-    rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (artist_mbids,))
+    rows = fetch_all(ARTIST_GID_SEARCH_QUERY, {"mbids": artist_mbids})
     artist_ids = [row[0] for row in rows]
 
     blacklist_ids = []
@@ -309,7 +309,7 @@ def lb_artist_predict(
             input.token
         )
         blacklist_mbids = [artist["artist_mbid"] for artist in blacklist]
-        blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, (blacklist_mbids,))
+        blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, {"mbids": blacklist_mbids})
         blacklist_ids = [row[0] for row in blacklist_rows]
 
     try:
@@ -319,7 +319,7 @@ def lb_artist_predict(
             blacklist_artist_ids=blacklist_ids,
         )
 
-        with get_connection() as conn:
+        with engine.connect() as conn:
             artist_df = enrich_artists_from_db(predict_artist_ids, conn)
 
     except RuntimeError as exc:
@@ -344,7 +344,7 @@ def lb_album_predict(
     releases = get_top_lb(input.username, input.range, input.min_listen, "releases", input.token)
     release_mbids = [release["release_mbid"] for release in releases]
 
-    rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (release_mbids,))
+    rows = fetch_all(ALBUM_GID_SEARCH_QUERY, {"mbids": release_mbids})
     releases_group_ids = [row[0] for row in rows]
 
     blacklist_ids = []
@@ -357,7 +357,7 @@ def lb_album_predict(
             input.token
         )
         blacklist_mbids = [release["release_mbid"] for release in blacklist]
-        blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, (blacklist_mbids,))
+        blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, {"mbids": blacklist_mbids})
         blacklist_ids = [row[0] for row in blacklist_rows]
 
     try:
@@ -367,7 +367,7 @@ def lb_album_predict(
             blacklist=blacklist_ids,
         )
 
-        with get_connection() as conn:
+        with engine.connect() as conn:
             release_groups_df = enrich_release_groups_from_db(predict_release_group_ids, conn)
 
     except RuntimeError as exc:

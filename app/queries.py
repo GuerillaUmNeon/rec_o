@@ -17,7 +17,7 @@ JOIN musicbrainz.artist_credit_name acn
     ON ac.id = acn.artist_credit
 JOIN musicbrainz.artist a
     ON acn.artist = a.id
-WHERE rg.name ILIKE %s
+WHERE rg.name ILIKE :title
 LIMIT 20;
 """
 
@@ -27,7 +27,7 @@ SELECT
     name,
     comment AS disambiguation
 FROM musicbrainz.artist
-WHERE name ILIKE %s
+WHERE name ILIKE :name
 LIMIT 20;
 """
 
@@ -36,18 +36,18 @@ SELECT
     id,
     name
 FROM musicbrainz.genre
-WHERE name ILIKE %s
+WHERE name ILIKE :genre_name
 LIMIT 20;
 """
 
 ARTIST_GID_SEARCH_QUERY = """
 SELECT id, gid
 FROM musicbrainz.artist
-WHERE gid = ANY (%s::uuid[]);
+WHERE gid = ANY (:mbids::uuid[]);
 """
 
 ALBUM_GID_SEARCH_QUERY = """
 SELECT release_group AS id
 FROM musicbrainz.release
-WHERE gid = ANY (%s::uuid[]);
+WHERE gid = ANY (:mbids::uuid[]);
 """
