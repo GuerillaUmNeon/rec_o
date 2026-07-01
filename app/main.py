@@ -62,10 +62,8 @@ async def lifespan(app: FastAPI):
             info = models_info.get(model_name, {})
             if not info.get("loaded"):
                 logger.warning(
-                    "%s model not loaded at startup — check %s_MODEL_LOCAL_PATH "
-                    "or MODEL_BUCKET_NAME + %s_MODEL_BLOB_NAME.",
+                    "%s model not loaded at startup — check %s_MODEL_LOCAL_PATH.",
                     model_name.replace("_", " ").title(),
-                    model_name.upper(),
                     model_name.upper(),
                 )
             else:
@@ -73,7 +71,7 @@ async def lifespan(app: FastAPI):
                     "%s model loaded at startup (%s): %s",
                     model_name.replace("_", " ").title(),
                     info.get("source"),
-                    info.get("path") or info.get("gcs_uri"),
+                    info.get("path"),
                 )
     except Exception as exc:
         logger.error("Model loading failed at startup: %s", exc, exc_info=True)

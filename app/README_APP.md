@@ -9,7 +9,7 @@ FastAPI service for artist and album (release group) recommendations (KNN) and M
 app/
   main.py              # FastAPI routes, auth, lifespan → load_models()
   models/              # Registry: load_models(), get_models_info()
-    loader.py          # Shared GCS / local path resolution
+    loader.py          # Shared local path resolution
   artist/              # Artist KNN inference
     config.py          # ARTIST_MODEL_* env vars
     loader.py          # load_artist_model(), get_artist_model_info()
@@ -48,44 +48,20 @@ Protected routes need header: `X-API-Key: <TOKEN_API_KEY>` (from `.env`).
 
 Recommender artifacts are loaded **at startup** via FastAPI **lifespan** (`main.py` → `load_models()` in `app/models/`). **Artist** and **release_group** are wired today. Artifacts are **not** baked into the Docker image.
 
-### Two sources (`.env`)
+### Configuration (`.env`)
 
-| Priority | Variable(s) | When to use |
-|----------|-------------|-------------|
-| **1 — Local file** | `ARTIST_MODEL_LOCAL_PATH`, `RELEASE_GROUP_MODEL_LOCAL_PATH` | Dev: test a `.pkl` on disk without GCS |
-| **2 — GCS** | `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` / `RELEASE_GROUP_MODEL_BLOB_NAME` | Same as prod / Docker / Cloud Run |
-
-If a local file is resolved, GCS is **not** used for that model (even if `MODEL_BUCKET_NAME` is set).
+| Variable(s) | Purpose |
+|-------------|-------------|
+| `ARTIST_MODEL_LOCAL_PATH`, `RELEASE_GROUP_MODEL_LOCAL_PATH` | Explicit path to a `.pkl` on disk |
 
 Local resolution order:
 
 1. `ARTIST_MODEL_LOCAL_PATH` / `RELEASE_GROUP_MODEL_LOCAL_PATH` (explicit)
 2. `models/<ARTIST_MODEL_LOCAL_FILENAME>` / `models/<RELEASE_GROUP_MODEL_LOCAL_FILENAME>` if the file exists (dev default after `train_local`)
-3. GCS download from `*_MODEL_BLOB_NAME`
 
-Legacy `MODEL_LOCAL_PATH` / `MODEL_BLOB_NAME` still work as fallbacks for **artist** only.
+Legacy `MODEL_LOCAL_PATH` still works as a fallback for **artist** only.
 
-If `*_MODEL_LOCAL_PATH` is missing for a model, the API downloads from GCS to a **temp cache**:
-
-```
-gs://<MODEL_BUCKET_NAME>/<ARTIST_MODEL_BLOB_NAME>
-    →  /tmp/<filename>.pkl
-gs://<MODEL_BUCKET_NAME>/<RELEASE_GROUP_MODEL_BLOB_NAME>
-    →  /tmp/<filename>.pkl
-```
-
-That `/tmp/...` path is **runtime only** (not in the Docker image; gone when the container stops).
-
-### Example `.env` — GCS (like prod)
-
-```bash
-MODEL_BUCKET_NAME=rec-o-models
-ARTIST_MODEL_BLOB_NAME=models/knn_model_test_joris_slim.pkl
-RELEASE_GROUP_MODEL_BLOB_NAME=models/release_group_knn_model_test.pkl
-# no *_MODEL_LOCAL_PATH
-```
-
-### Example `.env` — local file only
+### Example `.env`
 
 ```bash
 ARTIST_MODEL_LOCAL_PATH=models/knn_model_test_joris_slim.pkl
@@ -96,21 +72,15 @@ RELEASE_GROUP_MODEL_LOCAL_PATH=models/release_group_knn_model_test.pkl
 
 | Variable | Used by | Purpose |
 |----------|---------|---------|
-| `ARTIST_MODEL_LOCAL_FILENAME` | **`ml/artist/`** only | Name of file written by `train_local` (`models/`, `ml/outputs/`) |
+| `ARTIST_MODEL_LOCAL_FILENAME` | **`ml/artist/`** only | Name of file written by `train_local` (`models/`) |
 | `ARTIST_MODEL_LOCAL_PATH` | **`app/`** only | Explicit path for the API to load |
-| `MODEL_BUCKET_NAME` | **`app/`** + **`ml/`** | Shared GCS bucket (all models) |
-| `ARTIST_MODEL_BLOB_NAME` | **`app/`** (download) + **`ml/artist/`** (upload) | Artist KNN object path |
 | `RELEASE_GROUP_MODEL_LOCAL_PATH` | **`app/`** only | Explicit path for release group API load |
-| `RELEASE_GROUP_MODEL_BLOB_NAME` | **`app/`** (download) + **`ml/release_group/`** (upload) | Release group KNN object path |
 
-Train and upload first:
+Train first:
 
 ```bash
 python -m ml.artist.scripts.train_local
-python -m ml.artist.scripts.upload_artist
-
 python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
-python -m ml.release_group.scripts.upload_release_group
 ```
 
 See [ml/README_ML.md](../ml/README_ML.md).
@@ -125,23 +95,21 @@ curl http://localhost:8000/model
 {
   "artist": {
     "loaded": true,
-    "source": "gcs",
-    "path": "/tmp/knn_model_test_joris_slim.pkl",
-    "filename": "knn_model_test_joris_slim.pkl",
-    "gcs_uri": "gs://rec-o-models/models/knn_model_test_joris_slim.pkl"
+    "source": "local",
+    "path": "models/knn_model_test_joris_slim.pkl",
+    "filename": "knn_model_test_joris_slim.pkl"
   },
   "release_group": {
     "loaded": true,
     "source": "local",
     "path": "models/release_group_knn_model_test.pkl",
-    "filename": "release_group_knn_model_test.pkl",
-    "gcs_uri": null
+    "filename": "release_group_knn_model_test.pkl"
   },
-  "genre": { "loaded": false, "source": null, "path": null, "filename": null, "gcs_uri": null }
+  "genre": { "loaded": false, "source": null, "path": null, "filename": null }
 }
 ```
 
-If `artist.loaded` or `release_group.loaded` is `false`, check logs at startup, blob names, and cloud storage credentials.
+If `artist.loaded` or `release_group.loaded` is `false`, check logs at startup and model file paths.
 
 ## Docker
 
@@ -151,7 +119,7 @@ docker run --name rec-o-api -p 8000:8000 --env-file .env rec-o
 ```
 
 The image contains `app/` + a **minimal** `ml/release_group/features.py` stub (so `joblib` can unpickle trained artifacts) + Python deps. No `models/`, no full `ml/` training code, no `.pkl` baked in.  
-With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_NAME` in `--env-file`, the container downloads from GCS at startup (needs valid credentials in the environment or a service account on Cloud Run).
+Mount or copy model files into the container and set `ARTIST_MODEL_LOCAL_PATH` / `RELEASE_GROUP_MODEL_LOCAL_PATH` in `--env-file`.
 
 ## Endpoints
 
@@ -174,7 +142,7 @@ With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_
 
 | Function | Role |
 |----------|------|
-| `load_artist_model()` | Local path or GCS download → `joblib.load` |
+| `load_artist_model()` | Local path → `joblib.load` |
 | `get_artist_model_info()` | Metadata for `GET /model` → `artist` key |
 | `recommend_artist_ids()` | KNN nearest-neighbor artist IDs |
 | `enrich_artists_from_db()` | SQL enrichment for HTTP response |
@@ -183,7 +151,7 @@ With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_
 
 | Function | Role |
 |----------|------|
-| `load_release_group_model()` | Local path or GCS download → `joblib.load` |
+| `load_release_group_model()` | Local path → `joblib.load` |
 | `get_release_group_model_info()` | Metadata for `GET /model` → `release_group` key |
 | `recommend_release_group_ids()` | KNN nearest-neighbor release group IDs |
 | `enrich_release_groups_from_db()` | SQL enrichment (title, genres, URLs, tracks) |
@@ -196,4 +164,4 @@ With `MODEL_BUCKET_NAME` + `ARTIST_MODEL_BLOB_NAME` + `RELEASE_GROUP_MODEL_BLOB_
 ## Related docs
 
 - [README.md](../README.md) — project setup, quick start  
-- [ml/README_ML.md](../ml/README_ML.md) — train, upload to cloud storage, upload 403 troubleshooting
+- [ml/README_ML.md](../ml/README_ML.md) — train models
