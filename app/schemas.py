@@ -74,12 +74,8 @@ class AlbumPredictOutput(BaseModel):
     albums: list[AlbumPredictRow]
 
 class ListenbrainzInput(BaseModel):
-    username: str
     range: str = Field(default="week")
     min_listen: int = Field(default=5, ge=0)
     blacklist: str | None = None
     blacklist_min: int = Field(default=5, ge=0)
     max_results: int = Field(default=10, ge=1, le=100)
-    ntfy_url: str | None = None
-    ntfy_topic: str | None = None
-    token: str | None = None

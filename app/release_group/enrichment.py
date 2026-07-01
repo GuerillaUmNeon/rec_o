@@ -170,8 +170,12 @@ def format_duration_ms(length_ms: int | None) -> str:
 
     return f"{total_minutes} min"
 
-def send_ntfy_album_notification(input, album_output: AlbumPredictOutput):
-    if not input.ntfy_url or not input.ntfy_topic:
+def send_ntfy_album_notification(album_output: AlbumPredictOutput):
+    import os
+    ntfy_url = os.getenv('NTFY_URL')
+    ntfy_topic = os.getenv('NTFY_TOPIC')
+    
+    if not ntfy_url or not ntfy_topic:
         return
 
     blocks = ["# Recommended release groups"]
@@ -205,7 +209,7 @@ def send_ntfy_album_notification(input, album_output: AlbumPredictOutput):
 
     message = "\n\n".join(blocks)
 
-    publish_url = f"{input.ntfy_url.rstrip('/')}/{input.ntfy_topic}"
+    publish_url = f"{ntfy_url.rstrip('/')}/{ntfy_topic}"
     response = requests.post(
         publish_url,
         data=message.encode("utf-8"),

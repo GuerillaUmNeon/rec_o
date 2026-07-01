@@ -52,6 +52,7 @@ API_KEY = os.getenv("TOKEN_API_KEY")
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load recommender artifacts at startup (artist first; others later)."""
@@ -291,7 +292,7 @@ def lb_artist_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    artists = get_top_lb(input.username, input.range, input.min_listen, "artists", input.token)
+    artists = get_top_lb(input.range, input.min_listen, "artists")
     artist_mbids = [artist["artist_mbid"] for artist in artists]
 
     rows = fetch_all(ARTIST_GID_SEARCH_QUERY, {"mbids": artist_mbids})
@@ -300,11 +301,9 @@ def lb_artist_predict(
     blacklist_ids = []
     if input.blacklist != "None":
         blacklist = get_top_lb(
-            input.username,
             input.blacklist,
             input.blacklist_min,
-            "artists",
-            input.token
+            "artists"
         )
         blacklist_mbids = [artist["artist_mbid"] for artist in blacklist]
         blacklist_rows = fetch_all(ARTIST_GID_SEARCH_QUERY, {"mbids": blacklist_mbids})
@@ -329,7 +328,7 @@ def lb_artist_predict(
     artist_records = artist_df[["gid", "name", "genre", "urls"]].to_dict(orient="records")
 
     artist_output = PlaylistOutput(artists=artist_records)
-    send_ntfy_artist_notification(input, artist_output)
+    send_ntfy_artist_notification(artist_output)
 
     return ({"artists": artist_records})
 
@@ -339,7 +338,7 @@ def lb_album_predict(
     input: ListenbrainzInput,
     _: str = Depends(verify_api_key),
 ):
-    releases = get_top_lb(input.username, input.range, input.min_listen, "releases", input.token)
+    releases = get_top_lb(input.range, input.min_listen, "releases")
     release_mbids = [release["release_mbid"] for release in releases]
 
     rows = fetch_all(ALBUM_GID_SEARCH_QUERY, {"mbids": release_mbids})
@@ -348,11 +347,9 @@ def lb_album_predict(
     blacklist_ids = []
     if input.blacklist != None:
         blacklist = get_top_lb(
-            input.username,
             input.blacklist,
             input.blacklist_min,
-            "releases",
-            input.token
+            "releases"
         )
         blacklist_mbids = [release["release_mbid"] for release in blacklist]
         blacklist_rows = fetch_all(ALBUM_GID_SEARCH_QUERY, {"mbids": blacklist_mbids})
@@ -389,7 +386,6 @@ def lb_album_predict(
 
     album_output = AlbumPredictOutput(albums=release_groups)
 
-    if input.ntfy_url and input.ntfy_topic:
-        send_ntfy_album_notification(input, album_output)
+    send_ntfy_album_notification(album_output)
 
     return album_output
