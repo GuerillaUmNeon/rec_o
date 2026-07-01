@@ -5,7 +5,6 @@ _NOT_LOADED: dict = {
     "source": None,
     "path": None,
     "filename": None,
-    "gcs_uri": None,
 }
 
 
