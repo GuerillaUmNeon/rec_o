@@ -9,3 +9,14 @@ ml/outputs/
 !ml/outputs/.gitkeep
 /notebooks/
 /models/
+
+# Frontend
+front/.next/
+front/node_modules/
+front/.env.local
+front/.pnp/
+front/.pnp.js
+
+# IDE
+.idea/
+.ai/

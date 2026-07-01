@@ -84,7 +84,14 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
 
     return grouped
 
-def get_top_lb(username, range, min_listen, type, token):
+def get_top_lb(range, min_listen, type):
+    import os
+    username = os.getenv("LISTENBRAINZ_USERNAME")
+    token = os.getenv("LISTENBRAINZ_TOKEN")
+    
+    if not username or not token:
+        raise ValueError("LISTENBRAINZ_USERNAME and LISTENBRAINZ_TOKEN environment variables must be set")
+    
     url = f"{LISTENBRAINZ}/{username}/{type}"
     params = {
         "range": range,
@@ -130,8 +137,11 @@ def get_top_lb(username, range, min_listen, type, token):
 
     return filtered
 
-def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
-    if not input.ntfy_url or not input.ntfy_topic:
+def send_ntfy_artist_notification(artist_output: PlaylistOutput):
+    ntfy_url = os.getenv('NTFY_URL')
+    ntfy_topic = os.getenv('NTFY_TOPIC')
+    
+    if not ntfy_url or not ntfy_topic:
         return
 
     lines = ["# Recommended artists", ""]
@@ -157,7 +167,7 @@ def send_ntfy_artist_notification(input, artist_output: PlaylistOutput):
 
     message = "\n".join(lines)
 
-    publish_url = f"{input.ntfy_url.rstrip('/')}/{input.ntfy_topic}"
+    publish_url = f"{ntfy_url.rstrip('/')}/{ntfy_topic}"
     response = requests.post(
         publish_url,
         data=message.encode("utf-8"),
