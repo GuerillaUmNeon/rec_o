@@ -24,21 +24,33 @@ Backend project: [rec_o](https://github.com/GuerillaUmNeon/rec_o)
 
 ## Environment
 
-Create a `.env.local` file in the project root and copy the values from `.env.local.sample`.
+The frontend requires `API_URL` and `TOKEN_API_KEY` environment variables to communicate with the backend API.
 
-Example:
+These variables should be defined in the **backend `.env` file** (at the project root). There are two ways to make them available to the frontend:
+
+### Option 1: Create a frontend `.env.local` file
+Create a `front/.env.local` file with the same values as the backend `.env`:
 
 ```env
 API_URL="http://127.0.0.1:8000"
-TOKEN_API_KEY="123abc456def"
+TOKEN_API_KEY="your-api-key-here"
+```
+
+### Option 2: Export from backend `.env`
+Run the frontend with environment variables exported from the backend:
+
+```bash
+# From project root
+export $(grep -v '^#' .env | xargs)
+cd front && npm run dev
 ```
 
 ### Variables
 
 | Variable | Description |
 |---|---|
-| `API_URL` | Base URL for the backend API server. |
-| `TOKEN_API_KEY` | API key used for authenticated backend requests. |
+| `API_URL` | Base URL for the backend API server (e.g., `http://127.0.0.1:8000`). |
+| `TOKEN_API_KEY` | API key used for authenticated backend requests. Must match the backend's `TOKEN_API_KEY`. |
 
 ## Getting started
 

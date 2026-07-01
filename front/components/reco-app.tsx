@@ -20,15 +20,11 @@ function clampRecommendationCount(raw: string): number {
 }
 
 type ListenBrainzParams = {
-    username: string;
-    token: string;
     range: string;
     min_listen: number;
     blacklist: string;
     blacklist_min: number;
     max_results: number;
-    ntfy_url: string;
-    ntfy_topic: string;
 };
 
 function updateLbMinListen(params: ListenBrainzParams, raw: string): ListenBrainzParams {
@@ -172,7 +168,6 @@ function BrainLoader({ className = "h-4 w-4" }: { className?: string }) {
 type ThemeMode = "light" | "dark";
 type MainTab = "artists" | "albums";
 type InputMode = "manual" | "listenbrainz";
-type SharedListenBrainzField = "username" | "token" | "ntfy_url" | "ntfy_topic";
 
 type UrlRow = {
     type?: number;
@@ -319,33 +314,20 @@ export default function RecoApp() {
     const [albumLbOptionalOpen, setAlbumLbOptionalOpen] = useState(false);
 
     const [artistLbParams, setArtistLbParams] = useState<ListenBrainzParams>({
-        username: "",
-        token: "",
         range: "week",
         min_listen: 5,
         blacklist: "",
         blacklist_min: 5,
         max_results: 10,
-        ntfy_url: "",
-        ntfy_topic: "",
     });
 
     const [albumLbParams, setAlbumLbParams] = useState<ListenBrainzParams>({
-        username: "",
-        token: "",
         range: "week",
         min_listen: 5,
         blacklist: "",
         blacklist_min: 5,
         max_results: 10,
-        ntfy_url: "",
-        ntfy_topic: "",
     });
-
-    function setSharedLbField(field: SharedListenBrainzField, value: string) {
-        setArtistLbParams((prev) => ({ ...prev, [field]: value }));
-        setAlbumLbParams((prev) => ({ ...prev, [field]: value }));
-    }
 
     const artistSelectedEntries = useMemo(() => Object.entries(artistSelected), [artistSelected]);
     const artistBlacklistedEntries = useMemo(() => Object.entries(artistBlacklisted), [artistBlacklisted]);
@@ -714,16 +696,6 @@ export default function RecoApp() {
     }
 
     async function fetchListenBrainzArtistRecommendations() {
-        if (!artistLbParams.username.trim()) {
-            alert("Enter a ListenBrainz username.");
-            return;
-        }
-
-        if (!artistLbParams.token.trim()) {
-            alert("Enter a ListenBrainz token.");
-            return;
-        }
-
         const checked = canMakeRequest(artistRequestTimestamps);
         setArtistRequestTimestamps(checked.fresh);
 
@@ -737,15 +709,11 @@ export default function RecoApp() {
 
         try {
             const payload = {
-                username: artistLbParams.username.trim(),
-                token: artistLbParams.token.trim(),
                 range: artistLbParams.range,
                 min_listen: artistLbParams.min_listen,
                 blacklist: artistLbParams.blacklist.trim() || null,
                 blacklist_min: artistLbParams.blacklist_min,
                 max_results: artistLbParams.max_results,
-                ntfy_url: artistLbParams.ntfy_url.trim() || null,
-                ntfy_topic: artistLbParams.ntfy_topic.trim() || null,
             };
 
             const res = await fetch("/api/listenbrainz/artist", {
@@ -767,16 +735,6 @@ export default function RecoApp() {
     }
 
     async function fetchListenBrainzAlbumRecommendations() {
-        if (!albumLbParams.username.trim()) {
-            alert("Enter a ListenBrainz username.");
-            return;
-        }
-
-        if (!albumLbParams.token.trim()) {
-            alert("Enter a ListenBrainz token.");
-            return;
-        }
-
         const checked = canMakeRequest(albumRequestTimestamps);
         setAlbumRequestTimestamps(checked.fresh);
 
@@ -790,15 +748,11 @@ export default function RecoApp() {
 
         try {
             const payload = {
-                username: albumLbParams.username.trim(),
-                token: albumLbParams.token.trim(),
                 range: albumLbParams.range,
                 min_listen: albumLbParams.min_listen,
                 blacklist: albumLbParams.blacklist.trim() || null,
                 blacklist_min: albumLbParams.blacklist_min,
                 max_results: albumLbParams.max_results,
-                ntfy_url: albumLbParams.ntfy_url.trim() || null,
-                ntfy_topic: albumLbParams.ntfy_topic.trim() || null,
             };
 
             const res = await fetch("/api/listenbrainz/album", {
@@ -1289,25 +1243,6 @@ export default function RecoApp() {
 
                             {inputMode === "listenbrainz" && (
                                 <>
-                                    <h2 className="mb-2 text-base font-bold">ListenBrainz username</h2>
-                                    <input
-                                        className={inputClass}
-                                        placeholder="Enter a ListenBrainz username..."
-                                        value={activeLbParams.username}
-                                        onChange={(e) => setSharedLbField("username", e.target.value)}
-                                    />
-
-                                    <div className="mt-4">
-                                        <label className="mb-2 block text-sm font-semibold">Token</label>
-                                        <input
-                                            type="password"
-                                            className={inputClass}
-                                            placeholder="Enter your ListenBrainz token..."
-                                            value={activeLbParams.token}
-                                            onChange={(e) => setSharedLbField("token", e.target.value)}
-                                        />
-                                    </div>
-
                                     <div className={nestedPanelClass}>
                                         <button
                                             type="button"
@@ -1407,26 +1342,6 @@ export default function RecoApp() {
                                                             setActiveLbParams((prev) => updateLbMaxResults(prev, e.target.value))
                                                         }
                                                         className={inputClass}
-                                                    />
-                                                </div>
-
-                                                <div>
-                                                    <label className="mb-2 block text-sm font-semibold">ntfy URL</label>
-                                                    <input
-                                                        className={inputClass}
-                                                        placeholder="Optional ntfy URL..."
-                                                        value={activeLbParams.ntfy_url}
-                                                        onChange={(e) => setSharedLbField("ntfy_url", e.target.value)}
-                                                    />
-                                                </div>
-
-                                                <div>
-                                                    <label className="mb-2 block text-sm font-semibold">ntfy topic</label>
-                                                    <input
-                                                        className={inputClass}
-                                                        placeholder="Optional ntfy topic..."
-                                                        value={activeLbParams.ntfy_topic}
-                                                        onChange={(e) => setSharedLbField("ntfy_topic", e.target.value)}
                                                     />
                                                 </div>
                                             </div>
