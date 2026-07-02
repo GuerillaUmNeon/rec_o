@@ -2,7 +2,6 @@
 
 from app.database import engine
 from app.artist.loader import get_artist_model, load_artist_model
-from sqlalchemy import text
 
 
 def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
@@ -18,11 +17,15 @@ def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
         return []
 
     with engine.connect() as conn:
-        result = conn.execute(
-            text("""
+        # Build ARRAY constructor to avoid parameter binding issues with unnest()
+        # Use raw cursor to bypass SQLAlchemy parameter processing
+        ids_str = ", ".join(str(cid) for cid in candidate_ids)
+        
+        with conn.connection.cursor() as cursor:
+            query = f"""
                 WITH candidate_ids(id, ord) AS (
                     SELECT *
-                    FROM unnest(:ids::int[]) WITH ORDINALITY
+                    FROM unnest(ARRAY[{ids_str}]::int[]) WITH ORDINALITY
                 ),
                 primary_artists AS (
                     SELECT DISTINCT acn.artist AS id
@@ -51,10 +54,9 @@ def _filter_recommendable_artist_ids(candidate_ids: list[int]) -> list[int]:
                     ON artist_type.id = artist.type
                 WHERE artist_type.name IN ('Person', 'Group')
                 ORDER BY candidate_ids.ord
-            """),
-            {"ids": candidate_ids},
-        )
-        return [int(row[0]) for row in result.fetchall()]
+            """
+            cursor.execute(query)
+            return [int(row[0]) for row in cursor.fetchall()]
 
 
 def _recommend_artist_ids_from_artifact(
