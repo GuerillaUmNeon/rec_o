@@ -153,15 +153,14 @@ def recommend_artist_ids(
         )
 
     if isinstance(model, dict):
-        data = model.get("data")
-        if data is None:
-            data = model.get("df_clean")
+        data = model.get("data") or model.get("df_clean")
         if data is None:
             raise RuntimeError(
                 "Artist artifact must contain df_clean as 'data'. "
                 "Save {'vectorizer': vectorizer, 'model': knn_model, 'data': df_clean}."
             )
-
+        
+        # Type check: data is guaranteed to be non-None here and has a length
         candidate_count = min(
             len(data),
             max(top_n * 80, top_n + len(blacklist_artist_ids or []) + 200, 800),
