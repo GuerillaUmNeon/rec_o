@@ -100,15 +100,18 @@ def get_top_lb(range, min_listen, type):
         "Authorization": f"Token {token}"
     }
 
+    response = None
     try:
         response = requests.get(url, params=params, headers=auth_header, timeout=10)
         response.raise_for_status()
         data = response.json()
     except requests.exceptions.HTTPError as e:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"ListenBrainz API error: {response.text}"
-        ) from e
+        if response is not None:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"ListenBrainz API error: {response.text}"
+            ) from e
+        raise HTTPException(status_code=502, detail="ListenBrainz HTTP error") from e
     except requests.exceptions.RequestException as e:
         raise HTTPException(
             status_code=502,

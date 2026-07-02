@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 export async function POST(req: NextRequest) {
     const body = await req.json();
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    
     const res = await fetch(`${process.env.API_URL}/search/artist`, {
         method: "POST",
         headers: {
@@ -11,7 +14,10 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify(body),
         cache: "no-store",
+        signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
 
     const text = await res.text();
     return new NextResponse(text, {
