@@ -1,12 +1,12 @@
 raw_data/*
 __pycache__/
-app/__pycache__/
+back/app/__pycache__/
 *.pyc
-.env
+back/.env
 *.pkl
 *.joblib
-ml/outputs/
-!ml/outputs/.gitkeep
+back/ml/outputs/
+!back/ml/outputs/.gitkeep
 /notebooks/
 /models/
 
@@ -20,3 +20,5 @@ front/.pnp.js
 # IDE
 .idea/
 .ai/
+/back/notebooks/
+/back/models/

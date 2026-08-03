@@ -1,9 +1,0 @@
-.git
-.gitignore
-.python-version
-__pycache__
-*.pyc
-.venv
-notebooks/
-raw_data/
-*.ipynb
