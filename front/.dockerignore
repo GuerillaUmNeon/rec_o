@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+Dockerfile
+.dockerignore
+npm-debug.log
+README.md
+# Do NOT ignore .env.local if you want it copied
+#.env.local
