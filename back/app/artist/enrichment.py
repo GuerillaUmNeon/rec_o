@@ -51,7 +51,8 @@ def enrich_artists_from_db(artist_ids: list[int], conn) -> pd.DataFrame:
         WHERE artist.id IN ({placeholders})
     """
 
-    result = pd.read_sql_query(query, conn, params=artist_ids)
+    # SQLAlchemy expects one positional parameter tuple for the `%s` placeholders.
+    result = pd.read_sql_query(query, conn, params=tuple(artist_ids))
 
     if result.empty:
         return pd.DataFrame(columns=["id", "gid", "name", "genre", "urls"])

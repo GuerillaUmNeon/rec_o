@@ -153,7 +153,9 @@ def recommend_artist_ids(
         )
 
     if isinstance(model, dict):
-        data = model.get("data") or model.get("df_clean")
+        data = model.get("data")
+        if data is None:
+            data = model.get("df_clean")
         if data is None:
             raise RuntimeError(
                 "Artist artifact must contain df_clean as 'data'. "
