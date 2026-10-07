@@ -2,12 +2,21 @@
 """
 Train release group KNN and save artifacts locally (no GCS).
 
-Run from project root:
+Run from the ``back/`` directory:
   python -m ml.release_group.scripts.train_local
   python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
 """
 
 import argparse
+import sys
+from pathlib import Path
+
+# The documented command is run from ``back/`` (where ``ml`` is importable),
+# while the application modules use the repository-level ``back`` package.
+# Add the repository root so both package layouts resolve consistently.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
 
 from back.app.database import engine
 from back.ml.release_group.artifact import save_release_group_knn_artifact

@@ -151,10 +151,10 @@ python -c "import secrets; print(secrets.token_hex(32))"
 
 ```bash
 # Artist recommendations
-python -m ml.artist.scripts.train_local
+python -m back.ml.artist.scripts.train_local
 
 # Album/Release group recommendations (with dev options)
-python -m ml.release_group.scripts.train_local --limit 5000 --skip-type-inference --use-cache
+python -m back.ml.release_group.scripts.train_local
 ```
 
 See: [ml/README_ML.md](ml/README_ML.md)
@@ -183,8 +183,8 @@ From the repository root, build and run locally:
 
 ```bash
 docker build -f back/Dockerfile -t rec-o back
-docker run --name rec-o-api \
-  -p 8000:8000 \
+docker run --rm \
+  --network host \
   --env-file back/.env \
   rec-o
 ```
