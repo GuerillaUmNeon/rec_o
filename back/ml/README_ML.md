@@ -102,7 +102,6 @@ python -m ml.artist.scripts.train_local --limit 20000 --use-cache --refresh-cach
 |------|------------|
 | `ml/outputs/artist_training_features.pkl` | **SQL cache** — see below |
 | `models/<ARTIST_MODEL_LOCAL_FILENAME>` | **Trained model** (canonical local artifact) |
-| `models/<stem>_<timestamp>.pkl` | Timestamped backup per run |
 
 #### `artist_training_features.pkl` (intermediate cache)
 
